@@ -18,6 +18,8 @@ jobs:
           version: "0.10.14+7d59c7ec9"
           setup-core: true
           core-version: "0.10.14+7d59c7ec9"
+      - name: Resolve pinned MoonBit dependencies
+        run: moon update
       - name: Show toolchain
         run: moon version --all
       - name: Format check
@@ -51,6 +53,8 @@ jobs:
           version: "0.10.14+7d59c7ec9"
           setup-core: true
           core-version: "0.10.14+7d59c7ec9"
+      - name: Resolve pinned MoonBit dependencies
+        run: moon update
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14.3"
