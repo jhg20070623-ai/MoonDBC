@@ -24,9 +24,10 @@ For the optional independent oracle:
 ```sh
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements-dev.txt  # Windows
-python scripts/cantools_compare.py
+.venv/Scripts/python.exe scripts/cantools_compare.py                # Windows
 ```
 
-On Unix, activate `.venv` and install the same requirements before running the
-script. It builds comparison schemas in-memory from test data authored in this
-repository. cantools is not imported by the library or CLI.
+On Unix, activate `.venv`, install the same requirements, then run
+`python scripts/cantools_compare.py`. The script builds comparison schemas
+in-memory from test data authored in this repository. cantools is not imported
+by the library or CLI.

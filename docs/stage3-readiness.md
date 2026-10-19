@@ -66,6 +66,10 @@ party datasets. cantools is only a pinned development dependency.
 
 ## Git state
 
+This section is a point-in-time report for the Stage 3 review dated
+2026-10-18. It does not describe the later Stage 4 local Git baseline; see
+[`stage4-release-audit.md`](stage4-release-audit.md) for that state.
+
 `MoonDBC/` is not initialized as a Git repository: it has no `.git` directory,
 commit history, or remote. Therefore it has no Git clean/dirty status to report.
 No MoonSim files or commits were copied or modified as part of this directory's

@@ -88,9 +88,26 @@ moon run scripts/integration_test.mbtx
 ```
 
 The MoonBit integration script launches the CLI on the DBC files under `testdata/`.
-For an optional development-only comparison, install `requirements-dev.txt`
-into a Python environment and run `python scripts/cantools_compare.py`. Python
-and cantools are not used by the MoonBit library or CLI at runtime.
+For the optional development-only comparison, install `requirements-dev.txt`
+into a Python virtual environment and run the comparison with that environment's
+interpreter. On Windows:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe scripts/cantools_compare.py
+```
+
+On Unix-like systems:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python scripts/cantools_compare.py
+```
+
+Python and cantools are not used by the MoonBit library or CLI at runtime.
 
 ## Boundary with moonbit-pcap
 
