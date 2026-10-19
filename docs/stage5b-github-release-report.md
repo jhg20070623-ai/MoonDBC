@@ -32,6 +32,16 @@ The repository is public and declares Apache-2.0 in its license file and project
 
 ## Clone verification and remaining caveat
 
-A fresh public `git clone` was attempted after release, but this machine's HTTPS connection to `github.com:443` was reset/timed out during the transfer. No local clean-clone result is claimed. The hosted GitHub Actions run did check out the exact tagged commit into clean Ubuntu runners and completed all configured build, test, fixture, example, and comparison steps successfully.
+A fresh shallow clone of the public `v0.1.0` tag succeeded at `C:\Users\jiang\Documents\Codex\MoonDBC-v0.1.0-public-clone`. The source was checked out without copying the working repository's project build output, virtual environment, or dependency directory. `moon update` resolved the project dependencies; the MoonBit user-level cache was available, so this was a clean source clone but not an isolated machine-wide Moon cache. GitHub Actions separately validated the tagged source on clean hosted runners.
+
+From the clone, the following completed successfully:
+
+- `moon fmt --check`, `moon check`, and `moon test` (33/33 tests).
+- Native CLI build and the three disk-fixture validation paths.
+- `scripts/integration_test.mbtx` (8/8 checks).
+- README CLI workflows for validate, inspect, decode, and encode, including `A0BC` → raw `3018` → physical `1508`, and `IntelValue=3018` plus `Mode=2` → `A2BC`.
+- cantools 45.0.0 comparison (101 checks, 61 direct comparisons, no mismatches).
+
+The MoonBit dependency `moonbitlang/async@0.20.2` still emits its upstream `exclude` configuration deprecation warning. It did not fail local or hosted validation and was not changed as part of this release record.
 
 The GitHub Release is published. No Mooncakes package was published and no contest application was submitted.
