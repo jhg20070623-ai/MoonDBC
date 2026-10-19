@@ -13,7 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hustcer/setup-moonbit@v1
+      - uses: hustcer/setup-moonbit@v1.25
+        with:
+          version: "0.1.20260920"
+          setup-core: true
+          core-version: "0.10.14+7d59c7ec9"
       - name: Show toolchain
         run: moon version --all
       - name: Format check
@@ -42,10 +46,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hustcer/setup-moonbit@v1
+      - uses: hustcer/setup-moonbit@v1.25
+        with:
+          version: "0.1.20260920"
+          setup-core: true
+          core-version: "0.10.14+7d59c7ec9"
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.14.3"
       - name: Install development-only reference tool
         run: python -m pip install -r requirements-dev.txt
       - name: Compare golden vectors
