@@ -1,0 +1,9 @@
+pkgtype(kind: "executable")
+
+import {
+  "jhg20070623-ai/moondbc" @lib,
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+}

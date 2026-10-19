@@ -1,0 +1,20 @@
+VERSION "Synthetic Release 1.0"
+NS_ :
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    BA_DEF_DEF_
+BS_:
+BU_: ECU SENSOR
+
+BO_ 256 CommonHeader: 2 ECU
+ SG_ Speed : 4|12@1+ (0.5,-1) [-1|2047] "km/h" SENSOR
+ SG_ Mode : 0|2@1+ (1,0) [0|3] "" SENSOR
+CM_ BO_ 256 "Synthetic common-header fixture";
+CM_ SG_ 256 Speed "Synthetic speed signal";
+VAL_ 256 Mode 0 "Off" 1 "On" 2 "Hold" 3 "Fault";
+BA_DEF_ "BusType" STRING ;
+BA_DEF_DEF_ "BusType" "CAN";
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;
+BA_ "GenMsgCycleTime" BO_ 256 10;

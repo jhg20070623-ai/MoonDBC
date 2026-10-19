@@ -1,0 +1,73 @@
+import {
+  "moonbitlang/async@0.20.2",
+  "moonbitlang/async@0.20.2/process" @process,
+}
+
+async fn check_cli(
+  label : String,
+  args : Array[String],
+  should_succeed : Bool,
+) -> Unit {
+  let status = @process.run("moon", args, cwd=".")
+  if should_succeed && status != 0 {
+    fail("CLI integration failed: " + label)
+  }
+  if !should_succeed && status == 0 {
+    fail("CLI unexpectedly succeeded: " + label)
+  }
+  println("PASS " + label)
+}
+
+async fn main {
+  check_cli(
+    "minimal on-disk fixture with multiple signals",
+    ["run", "cmd/moondbc", "--", "validate", "testdata/minimal.dbc"],
+    true,
+  )
+  check_cli(
+    "common header and multiline NS_ fixture",
+    ["run", "cmd/moondbc", "--", "validate", "testdata/common_header.dbc"],
+    true,
+  )
+  check_cli(
+    "unsupported semantic fixture is rejected",
+    [
+      "run", "cmd/moondbc", "--", "validate",
+      "testdata/unsupported_semantics.dbc",
+    ],
+    false,
+  )
+  check_cli(
+    "inspect reads message and signal schema",
+    ["run", "cmd/moondbc", "--", "inspect", "testdata/minimal.dbc"],
+    true,
+  )
+  check_cli(
+    "decode executes against disk schema",
+    [
+      "run", "cmd/moondbc", "--", "decode", "testdata/minimal.dbc",
+      "--frame-id", "256", "--data", "A0BC",
+    ],
+    true,
+  )
+  check_cli(
+    "encode executes against disk schema",
+    [
+      "run", "cmd/moondbc", "--", "encode", "testdata/minimal.dbc",
+      "--message", "Minimal", "--signal", "IntelValue=3018", "--signal",
+      "Mode=2",
+    ],
+    true,
+  )
+  check_cli(
+    "invalid CLI arguments fail",
+    ["run", "cmd/moondbc", "--", "decode", "testdata/minimal.dbc", "--frame-id", "256"],
+    false,
+  )
+  check_cli(
+    "missing disk file fails",
+    ["run", "cmd/moondbc", "--", "validate", "testdata/not-found.dbc"],
+    false,
+  )
+  println("PASS file-level CLI integration: 8 checks")
+}

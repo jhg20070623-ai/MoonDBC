@@ -1,0 +1,137 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "jhg20070623-ai/moondbc"
+
+// Values
+pub fn decode_frame(DbcDatabase, UInt, Bytes) -> Result[DecodedFrame, FrameError]
+
+pub fn decode_message(MessageDefinition, Bytes) -> Result[Array[(String, RawSignalValue)], CodecError]
+
+pub fn decode_physical(SignalDefinition, RawSignalValue) -> Result[Double, CodecError]
+
+pub fn decode_raw_signal(SignalDefinition, Bytes) -> Result[RawSignalValue, CodecError]
+
+pub fn encode_frame(DbcDatabase, String, Array[(String, RawSignalValue)]) -> Result[Bytes, FrameError]
+
+pub fn encode_message(MessageDefinition, Array[RawSignalValue]) -> Result[Bytes, CodecError]
+
+pub fn encode_physical(SignalDefinition, Double, Bytes) -> Result[Bytes, CodecError]
+
+pub fn encode_raw_signal(SignalDefinition, RawSignalValue, Bytes) -> Result[Bytes, CodecError]
+
+pub fn find_message(DbcDatabase, UInt) -> MessageDefinition?
+
+pub fn parse_dbc(String) -> Result[DbcDatabase, ParseError]
+
+pub fn validate_schema(DbcDatabase) -> Array[ValidationIssue]
+
+// Errors
+
+// Types and methods
+pub(all) enum ByteOrder {
+  Intel
+  Motorola
+}
+
+pub(all) enum CodecError {
+  InvalidBitLength
+  InvalidSignalRange
+  FrameTooShort
+  DlcMismatch
+  RawSignednessMismatch
+  RawOutOfRange
+  InvalidScale
+  InvalidPhysicalValue
+  PhysicalValueNotRepresentable
+  PhysicalPrecisionExceeded
+  PhysicalOutOfRange
+}
+
+pub(all) struct DbcDatabase {
+  messages : Array[MessageDefinition]
+  diagnostics : Array[ParseDiagnostic]
+}
+
+pub(all) struct DecodedFrame {
+  message_id : UInt
+  message_name : String
+  values : Array[(String, RawSignalValue)]
+}
+
+pub(all) enum FrameError {
+  UnknownMessageId(UInt)
+  UnknownMessageName(String)
+  InvalidSchema(String)
+  MissingSignalValue(String)
+  DuplicateSignalValue(String)
+  UnknownSignalValue(String)
+  Codec(CodecError)
+}
+
+pub(all) enum IssueSeverity {
+  Error
+  Warning
+}
+
+pub(all) struct MessageDefinition {
+  id : UInt
+  name : String
+  dlc : Int
+  signals : Array[SignalDefinition]
+  source_line : Int
+}
+
+pub(all) struct ParseDiagnostic {
+  line : Int
+  code : String
+  message : String
+}
+
+pub(all) struct ParseError {
+  line : Int
+  kind : ParseErrorKind
+  message : String
+}
+
+pub(all) enum ParseErrorKind {
+  InvalidField
+  UnsupportedSyntax
+  UnsupportedSemantic
+  SignalWithoutMessage
+  InvalidMessage
+  InvalidSignal
+}
+
+pub(all) enum RawSignalValue {
+  UnsignedValue(UInt64)
+  SignedValue(Int64)
+}
+
+pub(all) struct SignalDefinition {
+  name : String
+  start_bit : Int
+  bit_length : Int
+  byte_order : ByteOrder
+  signedness : Signedness
+  factor : Double
+  offset : Double
+  minimum : Double?
+  maximum : Double?
+  unit : String
+  source_line : Int
+}
+
+pub(all) enum Signedness {
+  Unsigned
+  Signed
+}
+
+pub(all) struct ValidationIssue {
+  severity : IssueSeverity
+  code : String
+  message : String
+  line : Int
+}
+
+// Type aliases
+
+// Traits

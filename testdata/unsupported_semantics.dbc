@@ -1,0 +1,9 @@
+VERSION "1.0"
+NS_ :
+    CM_
+    BA_
+BS_:
+BU_: ECU
+BO_ 256 ExtendedFrame: 8 ECU
+ SG_ Value : 0|8@1+ (1,0) [0|255] "" ECU
+BA_ "VFrameFormat" BO_ 256 1;
