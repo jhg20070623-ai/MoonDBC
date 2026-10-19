@@ -10,9 +10,9 @@ permissions:
 jobs:
   moonbit:
     name: MoonBit core, CLI, and fixture integration
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: hustcer/setup-moonbit@v1.25
         with:
           version: "0.1.20260920"
@@ -43,15 +43,15 @@ jobs:
 
   cantools:
     name: Optional independent cantools comparison
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: hustcer/setup-moonbit@v1.25
         with:
           version: "0.1.20260920"
           setup-core: true
           core-version: "0.10.14+7d59c7ec9"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14.3"
       - name: Install development-only reference tool
