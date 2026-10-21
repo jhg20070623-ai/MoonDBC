@@ -1,0 +1,9 @@
+VERSION ""
+NS_ :
+BS_:
+BU_: ECU
+BO_ 700 Mux: 2 ECU
+ SG_ Mode M : 0|2@1+ (1,0) [0|3] "" ECU
+ SG_ Base : 2|6@1+ (1,0) [0|63] "" ECU
+ SG_ A m1 : 8|8@1+ (1,0) [0|255] "" ECU
+ SG_ B m2 : 8|8@1+ (1,0) [0|255] "" ECU

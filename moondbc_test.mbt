@@ -21,6 +21,7 @@ fn signal(
     minimum,
     maximum,
     unit: "",
+    multiplexing: @moondbc.NotMultiplexed,
     source_line: 1,
   }
 }
@@ -60,17 +61,16 @@ test "parser reports malformed fields with source line" {
 }
 
 ///|
-test "parser explicitly rejects multiplexing markers" {
+test "parser retains single-level multiplexing markers" {
   match
     @moondbc.parse_dbc(
       "BO_ 1 Example: 1 ECU\n SG_ Value M : 0|1@1+ (1,0) [0|1] \"\" ECU",
     ) {
-    Err(error) =>
-      match error.kind {
-        @moondbc.UnsupportedSemantic => ()
-        _ => fail("wrong parse error kind")
-      }
-    Ok(_) => fail("multiplexed signal marker was silently accepted")
+    Err(_) => fail("valid multiplexor marker did not parse")
+    Ok(database) =>
+      assert_true(
+        database.messages[0].signals[0].multiplexing is @moondbc.Multiplexor,
+      )
   }
 }
 
@@ -263,7 +263,7 @@ test "parser preserves quoted unit spaces and diagnoses extra receivers" {
 }
 
 ///|
-test "parser rejects frame-format attributes, multiplexing and float signals" {
+test "parser rejects frame-format attributes and float signals" {
   let semantic_dbc = "VERSION \"1.0\"\nNS_ :\n BA_\nBS_:\nBU_: ECU\nBO_ 256 ExtendedFrame: 8 ECU\n SG_ Value : 0|8@1+ (1,0) [0|255] \"\" ECU\nBA_ \"VFrameFormat\" BO_ 256 1;"
   match @moondbc.parse_dbc(semantic_dbc) {
     Err(error) =>
@@ -273,13 +273,6 @@ test "parser rejects frame-format attributes, multiplexing and float signals" {
       }
     Ok(_) => fail("frame-format attribute was silently ignored")
   }
-  match
-    @moondbc.parse_dbc(
-      "BO_ 1 M: 1 ECU\n SG_ Mux m0 : 0|1@1+ (1,0) [0|1] \"\" ECU",
-    ) {
-    Err(_) => ()
-    Ok(_) => fail("multiplexed signal was silently accepted")
-  }
   match @moondbc.parse_dbc("BO_ 1 M: 8 ECU\nSIG_VALTYPE_ 1 Value : 1;") {
     Err(error) =>
       match error.kind {
@@ -287,6 +280,86 @@ test "parser rejects frame-format attributes, multiplexing and float signals" {
         _ => fail("floating signal type had wrong error classification")
       }
     Ok(_) => fail("floating signal type was silently interpreted as integer")
+  }
+}
+
+///|
+test "single-level multiplexed fixture validates and decodes active signals" {
+  let source = "VERSION \"\"\nNS_ :\nBS_:\nBU_: ECU\nBO_ 700 Mux: 2 ECU\n SG_ Mode M : 0|2@1+ (1,0) [0|3] \"\" ECU\n SG_ Base : 2|6@1+ (1,0) [0|63] \"\" ECU\n SG_ A m1 : 8|8@1+ (1,0) [0|255] \"\" ECU\n SG_ B m2 : 8|8@1+ (1,0) [0|255] \"\" ECU"
+  let database = match @moondbc.parse_dbc(source) {
+    Ok(database) => database
+    Err(error) => fail("multiplexed DBC failed to parse on line \{error.line}")
+  }
+  let issues = @moondbc.validate_schema(database)
+  for issue in issues {
+    if issue.severity is @moondbc.Error {
+      fail("valid disjoint multiplexed branches rejected: \{issue.code}")
+    }
+  }
+  match
+    @moondbc.decode_frame(database, 700U, [0x01U.to_byte(), 0x2AU.to_byte()]) {
+    Ok(frame) => {
+      assert_eq(frame.values.length(), 3)
+      assert_eq(frame.values[0].0, "Mode")
+      assert_eq(frame.values[1].0, "Base")
+      assert_eq(frame.values[2].0, "A")
+      match frame.values[2].1 {
+        @moondbc.UnsignedValue(value) => assert_eq(value, 42UL)
+        _ => fail("branch A raw value was not unsigned")
+      }
+    }
+    Err(_) => fail("branch 1 frame failed to decode")
+  }
+  match
+    @moondbc.decode_frame(database, 700U, [0x02U.to_byte(), 0x63U.to_byte()]) {
+    Ok(frame) => {
+      assert_eq(frame.values.length(), 3)
+      assert_eq(frame.values[2].0, "B")
+      match frame.values[2].1 {
+        @moondbc.UnsignedValue(value) => assert_eq(value, 99UL)
+        _ => fail("branch B raw value was not unsigned")
+      }
+    }
+    Err(_) => fail("branch 2 frame failed to decode")
+  }
+}
+
+///|
+test "single-level multiplexed encoding requires exactly active signal values" {
+  let source = "BO_ 700 Mux: 2 ECU\n SG_ Mode M : 0|2@1+ (1,0) [0|3] \"\" ECU\n SG_ Base : 2|6@1+ (1,0) [0|63] \"\" ECU\n SG_ A m1 : 8|8@1+ (1,0) [0|255] \"\" ECU\n SG_ B m2 : 8|8@1+ (1,0) [0|255] \"\" ECU"
+  let database = match @moondbc.parse_dbc(source) {
+    Ok(database) => database
+    Err(_) => fail("multiplexed DBC failed to parse")
+  }
+  match
+    @moondbc.encode_frame(database, "Mux", [
+      ("Mode", @moondbc.UnsignedValue(1UL)),
+      ("Base", @moondbc.UnsignedValue(0UL)),
+      ("A", @moondbc.UnsignedValue(42UL)),
+    ]) {
+    Ok(payload) => assert_eq(payload, [0x01U.to_byte(), 0x2AU.to_byte()])
+    Err(_) => fail("active branch values did not encode")
+  }
+  match
+    @moondbc.encode_frame(database, "Mux", [
+      ("Mode", @moondbc.UnsignedValue(1UL)),
+      ("Base", @moondbc.UnsignedValue(0UL)),
+      ("A", @moondbc.UnsignedValue(42UL)),
+      ("B", @moondbc.UnsignedValue(99UL)),
+    ]) {
+    Err(@moondbc.UnknownSignalValue(_)) => ()
+    _ => fail("inactive branch value was not rejected")
+  }
+}
+
+///|
+test "nested multiplexing marker is explicitly unsupported" {
+  match
+    @moondbc.parse_dbc(
+      "BO_ 1 M: 1 ECU\n SG_ Value m1M : 0|1@1+ (1,0) [0|1] \"\" ECU",
+    ) {
+    Err(error) => assert_true(error.kind is @moondbc.UnsupportedSemantic)
+    Ok(_) => fail("nested multiplexing marker was silently accepted")
   }
 }
 

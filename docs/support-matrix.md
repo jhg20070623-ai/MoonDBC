@@ -19,7 +19,8 @@ not imply that MoonDBC preserves it in a round-trip writer.
 | Floating `SIG_VALTYPE_` | Rejected | Floating representation is not implemented. |
 | Extended CAN identifier | Supported | DBC bit-31 marker is preserved in the schema; CLI frame matching uses the actual 29-bit ID and explicit standard/extended frame type. |
 | Offline `candump -L` batch decode | Supported subset | CLI accepts `(timestamp) interface ID#DATA` classic CAN records with 3-digit standard or 8-digit extended IDs; emits ordered NDJSON and rejects CAN FD/other spellings with line-numbered errors. |
-| Multiplexing | Rejected | Multiplexor-dependent signal interpretation is unsupported. |
+| Single-level integer multiplexing | Supported subset | One leading unsigned `M` selector of at most 31 bits and exact `mN` branches. Decode and encode include only the selected branch; overlapping branch layouts are accepted only for distinct selector values. |
+| Nested, ranged, or multiple-selector multiplexing | Rejected | Unsupported selector syntax or branch semantics produce an explicit parser/schema error. |
 | CAN FD, ARXML | Not implemented | Outside the current parser and codec. |
 
 The accepted standard CAN ID range is 0–2047; extended CAN IDs range from 0 to

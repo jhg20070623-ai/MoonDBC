@@ -11,6 +11,7 @@ fn main {
     minimum: Some(-1.0),
     maximum: Some(2047.0),
     unit: "km/h",
+    multiplexing: @moondbc.NotMultiplexed,
     source_line: 1,
   }
   let motorola = @moondbc.SignalDefinition::{
@@ -24,6 +25,7 @@ fn main {
     minimum: Some(0.0),
     maximum: Some(4095.0),
     unit: "raw",
+    multiplexing: @moondbc.NotMultiplexed,
     source_line: 1,
   }
   let signed = @moondbc.SignalDefinition::{
@@ -37,6 +39,7 @@ fn main {
     minimum: Some(-2048.0),
     maximum: Some(2047.0),
     unit: "raw",
+    multiplexing: @moondbc.NotMultiplexed,
     source_line: 1,
   }
   let intel_payload = Bytes::from_array([b'\xA0', b'\xBC'])
@@ -156,6 +159,7 @@ fn make_motorola_signal(
     minimum: None,
     maximum: None,
     unit: "",
+    multiplexing: @moondbc.NotMultiplexed,
     source_line: 1,
   }
 }

@@ -99,15 +99,17 @@ rejected. Raw values in each embedded decode record remain decimal strings.
 The current implementation handles classic CAN frames with DLC 0–8, standard
 and extended 29-bit message identifiers, Intel little-endian and Motorola DBC
 sawtooth bit numbering, signed and unsigned integer signals, factor/offset
-conversion, and schema checks for widths, ranges, overlap, and DLC bounds. DBC
-extended identifiers use the DBC bit-31 marker internally; the frame CLI takes
+conversion, and schema checks for widths, ranges, overlap, and DLC bounds. It
+also supports single-level integer multiplexing with one leading unsigned
+selector and `mN` branches; only branch signals with distinct selector values
+may overlap. DBC extended identifiers use the DBC bit-31 marker internally; the frame CLI takes
 the actual on-bus identifier and an explicit `--extended` flag. The current
 parser's exact declaration handling is listed in
 [`docs/support-matrix.md`](docs/support-matrix.md).
 
-Multiplexing, floating-point signals, and attributes that can alter frame or
-signal interpretation are rejected. CAN FD, ARXML, CAN hardware I/O, and
-complete DBC compatibility are outside this MVP.
+Nested, ranged, or otherwise complex multiplexing, floating-point signals, and
+attributes that can alter frame or signal interpretation are rejected. CAN FD,
+ARXML, CAN hardware I/O, and complete DBC compatibility are outside this MVP.
 
 ## Tests and independent comparison
 

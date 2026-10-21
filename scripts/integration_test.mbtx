@@ -117,6 +117,25 @@ async fn main {
     expected_output="\"frame_id\":291,\"extended\":true,\"message\":\"ExtendedFrame\"",
   )
   check_cli(
+    "multiplexed frame decodes only the active branch",
+    [
+      "run", "cmd/moondbc", "--", "decode", "testdata/multiplexed.dbc",
+      "--frame-id", "700", "--data", "012A", "--json",
+    ],
+    true,
+    expected_output="\"name\":\"A\",\"raw\":\"42\"",
+  )
+  check_cli(
+    "multiplexed encode emits selector and active branch",
+    [
+      "run", "cmd/moondbc", "--", "encode", "testdata/multiplexed.dbc",
+      "--message", "Mux", "--signal", "Mode=1", "--signal", "Base=0",
+      "--signal", "A=42",
+    ],
+    true,
+    expected_output="payload=012A",
+  )
+  check_cli(
     "candump log decodes ordered frames as NDJSON",
     [
       "run", "cmd/moondbc", "--", "decode-log", "testdata/candump.dbc",
@@ -143,5 +162,5 @@ async fn main {
     ["run", "cmd/moondbc", "--", "validate", "testdata/not-found.dbc"],
     false,
   )
-  println("PASS file-level CLI integration: 16 checks")
+  println("PASS file-level CLI integration: 18 checks")
 }

@@ -167,6 +167,32 @@ def main() -> None:
     check(f"raw={standard_raw}" in standard_cli, "MoonBit/cantools agree: standard frame ID dispatch")
     check(f"raw={extended_raw}" in extended_cli, "MoonBit/cantools agree: extended frame ID dispatch")
 
+    mux_database = cantools.database.load_file("testdata/multiplexed.dbc")
+    mux_message = mux_database.get_message_by_name("Mux")
+    for selector, branch_name, payload in [(1, "A", bytes.fromhex("01 2A")),
+                                            (2, "B", bytes.fromhex("02 63"))]:
+        expected = mux_message.decode(payload, decode_choices=False, scaling=False)
+        moonbit_decode = subprocess.run(
+            ["moon", "run", "cmd/moondbc", "--", "decode", "testdata/multiplexed.dbc",
+             "--frame-id", "700", "--data", payload.hex(), "--json"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        actual = json.loads(moonbit_decode)
+        actual_signals = {item["name"]: int(item["raw"]) for item in actual["signals"]}
+        check(
+            actual_signals == expected,
+            f"MoonBit/cantools agree: multiplex selector {selector} active decode",
+        )
+        encoded = mux_message.encode(expected, scaling=False, strict=True)
+        moonbit_encode = subprocess.run(
+            ["moon", "run", "cmd/moondbc", "--", "encode", "testdata/multiplexed.dbc",
+             "--message", "Mux", "--signal", f"Mode={selector}", "--signal", "Base=0",
+             "--signal", f"{branch_name}={expected[branch_name]}"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        check(encoded.hex().upper() in moonbit_encode,
+              f"MoonBit/cantools agree: multiplex selector {selector} encode")
+
     for index, width in enumerate(MOTOROLA_WIDTHS):
         unsigned_id = 300 + index * 2
         signed_id = unsigned_id + 1

@@ -13,6 +13,15 @@ pub(all) enum Signedness {
 }
 
 ///|
+/// Single-level DBC multiplexing role. Branch values select mutually
+/// exclusive signals; nested and ranged multiplexing are not represented.
+pub(all) enum Multiplexing {
+  NotMultiplexed
+  Multiplexor
+  Multiplexed(Int)
+}
+
+///|
 /// A raw integer value without losing unsigned 64-bit payloads.
 pub(all) enum RawSignalValue {
   UnsignedValue(UInt64)
@@ -34,6 +43,7 @@ pub(all) struct SignalDefinition {
   minimum : Double?
   maximum : Double?
   unit : String
+  multiplexing : Multiplexing
   source_line : Int
 }
 
@@ -446,7 +456,16 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
           message: "SG_ declaration appears before any BO_ message",
         })
       }
-      if tokens.length() > 8 || (tokens.length() > 7 && tokens[7].contains(",")) {
+      let receiver_index = if tokens.length() > 2 && tokens[2] != ":" {
+        8
+      } else {
+        7
+      }
+      if tokens.length() > receiver_index + 1 ||
+        (
+          tokens.length() > receiver_index &&
+          tokens[receiver_index].contains(",")
+        ) {
         diagnostics.push(ParseDiagnostic::{
           line: line_number,
           code: "RECEIVERS_IGNORED",
@@ -961,15 +980,60 @@ fn parse_signal(
       message: "SG_ requires name, layout, scale, range, and unit",
     })
   }
-  if tokens[2] != ":" {
+  let (multiplexing, layout_index) = if tokens[2] == ":" {
+    (NotMultiplexed, 3)
+  } else if tokens.length() > 3 && tokens[3] == ":" {
+    let marker = tokens[2]
+    if marker == "M" {
+      (Multiplexor, 4)
+    } else if marker.has_prefix("m") {
+      if marker.contains("M") || marker.length() == 1 {
+        return Err(ParseError::{
+          line,
+          kind: UnsupportedSemantic,
+          message: "nested or malformed multiplexing marker is unsupported",
+        })
+      }
+      let branch_text = marker[1:marker.length()].to_string_view()
+      let branch = @string.parse_int(branch_text) catch {
+        _ =>
+          return Err(ParseError::{
+            line,
+            kind: UnsupportedSemantic,
+            message: "only single-level mN multiplexing branches are supported",
+          })
+      }
+      if branch < 0 {
+        return Err(ParseError::{
+          line,
+          kind: InvalidField,
+          message: "multiplexing branch value must be nonnegative",
+        })
+      }
+      (Multiplexed(branch), 4)
+    } else {
+      return Err(ParseError::{
+        line,
+        kind: UnsupportedSemantic,
+        message: "unsupported multiplexing marker; expected M or mN",
+      })
+    }
+  } else {
     return Err(ParseError::{
       line,
       kind: UnsupportedSemantic,
-      message: "multiplexing markers are not supported",
+      message: "unsupported SG_ multiplexing syntax",
+    })
+  }
+  if tokens.length() < layout_index + 5 {
+    return Err(ParseError::{
+      line,
+      kind: InvalidSignal,
+      message: "SG_ declaration is missing layout, scaling, range, unit, or receiver",
     })
   }
   let name = tokens[1]
-  let layout = tokens[3].to_string_view()
+  let layout = tokens[layout_index].to_string_view()
   let (start_text, remainder) = match layout.split_once("|") {
     Some(parts) => parts
     None =>
@@ -1031,29 +1095,25 @@ fn parse_signal(
         message: "signal sign must be '+' or '-'",
       })
   }
-  let scale = match parse_pair(tokens[4], '(', ')', line, "scale") {
+  let scale = match
+    parse_pair(tokens[layout_index + 1], '(', ')', line, "scale") {
     Ok(value) => value
     Err(error) => return Err(error)
   }
-  let range = match parse_pair(tokens[5], '[', ']', line, "range") {
+  let range = match
+    parse_pair(tokens[layout_index + 2], '[', ']', line, "range") {
     Ok(value) => value
     Err(error) => return Err(error)
   }
-  if tokens[6].has_prefix("\"") != tokens[6].has_suffix("\"") {
+  if tokens[layout_index + 3].has_prefix("\"") !=
+    tokens[layout_index + 3].has_suffix("\"") {
     return Err(ParseError::{
       line,
       kind: InvalidField,
       message: "SG_ unit string has unmatched quotes",
     })
   }
-  if tokens.length() < 8 {
-    return Err(ParseError::{
-      line,
-      kind: InvalidSignal,
-      message: "SG_ requires at least one receiver token",
-    })
-  }
-  let unit = unquote(tokens[6])
+  let unit = unquote(tokens[layout_index + 3])
   Ok(SignalDefinition::{
     name,
     start_bit,
@@ -1065,6 +1125,7 @@ fn parse_signal(
     minimum: Some(range.0),
     maximum: Some(range.1),
     unit,
+    multiplexing,
     source_line: line,
   })
 }
@@ -1205,6 +1266,55 @@ pub fn validate_schema(database : DbcDatabase) -> Array[ValidationIssue] {
         line: message.source_line,
       })
     }
+    let mut multiplexor_count = 0
+    for signal in message.signals {
+      match signal.multiplexing {
+        Multiplexor => {
+          multiplexor_count += 1
+          if signal.signedness is Signed {
+            issues.push(ValidationIssue::{
+              severity: Error,
+              code: "SIGNED_MULTIPLEXOR",
+              message: "the supported multiplexor selector must be unsigned",
+              line: signal.source_line,
+            })
+          }
+          if signal.bit_length > 31 {
+            issues.push(ValidationIssue::{
+              severity: Error,
+              code: "MULTIPLEXOR_TOO_WIDE",
+              message: "selector width must be at most 31 bits for the supported branch index type",
+              line: signal.source_line,
+            })
+          }
+        }
+        _ => ()
+      }
+    }
+    if multiplexor_count > 1 {
+      issues.push(ValidationIssue::{
+        severity: Error,
+        code: "MULTIPLE_MULTIPLEXORS",
+        message: "a message may define only one multiplexor in the supported subset",
+        line: message.source_line,
+      })
+    }
+    let first_is_multiplexor = if message.signals.length() == 0 {
+      false
+    } else {
+      match message.signals[0].multiplexing {
+        Multiplexor => true
+        _ => false
+      }
+    }
+    if multiplexor_count == 1 && !first_is_multiplexor {
+      issues.push(ValidationIssue::{
+        severity: Error,
+        code: "MULTIPLEXOR_ORDER",
+        message: "the supported codec requires the multiplexor selector as the first signal",
+        line: message.source_line,
+      })
+    }
     if message.id > 0x7FFU &&
       !(message.id >= 0x80000000U && message.id - 0x80000000U <= 0x1FFFFFFFU) {
       issues.push(ValidationIssue::{
@@ -1264,6 +1374,30 @@ pub fn validate_schema(database : DbcDatabase) -> Array[ValidationIssue] {
           line: signal.source_line,
         })
       }
+      match signal.multiplexing {
+        Multiplexed(branch) =>
+          if multiplexor_count != 1 {
+            issues.push(ValidationIssue::{
+              severity: Error,
+              code: "MULTIPLEXOR_MISSING_SELECTOR",
+              message: "multiplexed signals require exactly one selector in their message",
+              line: signal.source_line,
+            })
+          } else {
+            for selector in message.signals {
+              if selector.multiplexing is Multiplexor &&
+                !branch_fits_selector(branch, selector.bit_length) {
+                issues.push(ValidationIssue::{
+                  severity: Error,
+                  code: "MULTIPLEX_BRANCH_OUT_OF_RANGE",
+                  message: "multiplex branch value does not fit the selector width",
+                  line: signal.source_line,
+                })
+              }
+            }
+          }
+        _ => ()
+      }
       let mut previous = 0
       while previous < s {
         if message.signals[previous].name == signal.name {
@@ -1274,7 +1408,8 @@ pub fn validate_schema(database : DbcDatabase) -> Array[ValidationIssue] {
             line: signal.source_line,
           })
         }
-        if signals_overlap(message.signals[previous], signal) {
+        if signals_overlap(message.signals[previous], signal) &&
+          !branches_are_exclusive(message.signals[previous], signal) {
           issues.push(ValidationIssue::{
             severity: Error,
             code: "SIGNAL_OVERLAP",
@@ -1289,6 +1424,30 @@ pub fn validate_schema(database : DbcDatabase) -> Array[ValidationIssue] {
     i += 1
   }
   issues
+}
+
+///|
+fn branch_fits_selector(branch : Int, width : Int) -> Bool {
+  if branch < 0 || width < 1 || width > 64 {
+    return false
+  }
+  if width >= 31 {
+    true
+  } else {
+    branch <= (1 << width) - 1
+  }
+}
+
+///|
+fn branches_are_exclusive(
+  left : SignalDefinition,
+  right : SignalDefinition,
+) -> Bool {
+  match (left.multiplexing, right.multiplexing) {
+    (Multiplexed(left_branch), Multiplexed(right_branch)) =>
+      left_branch != right_branch
+    _ => false
+  }
 }
 
 ///|
@@ -1459,8 +1618,24 @@ pub fn decode_message(
   if message.dlc < 0 || message.dlc > 8 || payload.length() != message.dlc {
     return Err(DlcMismatch)
   }
+  let selected_branch = match message.signals.length() > 0 {
+    true =>
+      match message.signals[0].multiplexing {
+        Multiplexor =>
+          match decode_raw_signal(message.signals[0], payload) {
+            Ok(UnsignedValue(raw)) => Some(raw.to_int())
+            Ok(_) => return Err(RawSignednessMismatch)
+            Err(error) => return Err(error)
+          }
+        _ => None
+      }
+    false => None
+  }
   let values : Array[(String, RawSignalValue)] = []
   for signal in message.signals {
+    if !signal_is_active(signal, selected_branch) {
+      continue
+    }
     match decode_raw_signal(signal, payload) {
       Ok(value) => values.push((signal.name, value))
       Err(error) => return Err(error)
@@ -1470,8 +1645,8 @@ pub fn decode_message(
 }
 
 ///|
-/// Encode raw values into a zero-filled frame, validating exact count/name and
-/// DLC. Values are supplied in the same order as `message.signals`.
+/// Encode active raw values into a zero-filled frame. For multiplexed
+/// messages the selector must be first and inactive branch values are omitted.
 pub fn encode_message(
   message : MessageDefinition,
   values : Array[RawSignalValue],
@@ -1479,19 +1654,61 @@ pub fn encode_message(
   if message.dlc < 0 || message.dlc > 8 {
     return Err(DlcMismatch)
   }
-  if values.length() != message.signals.length() {
+  if message.signals.length() > 0 &&
+    message.signals[0].multiplexing is Multiplexor &&
+    values.length() == 0 {
+    return Err(RawSignednessMismatch)
+  }
+  let selected_branch = match message.signals.length() > 0 {
+    true =>
+      match message.signals[0].multiplexing {
+        Multiplexor =>
+          match values[0] {
+            UnsignedValue(raw) => Some(raw.to_int())
+            _ => return Err(RawSignednessMismatch)
+          }
+        _ => None
+      }
+    false => None
+  }
+  let active_count = active_signal_count(message, selected_branch)
+  if values.length() != active_count {
     return Err(RawSignednessMismatch)
   }
   let mut payload = Bytes::make(message.dlc, 0U.to_byte())
-  let mut i = 0
-  while i < message.signals.length() {
-    match encode_raw_signal(message.signals[i], values[i], payload) {
-      Ok(encoded) => payload = encoded
-      Err(error) => return Err(error)
+  let mut input_index = 0
+  for signal in message.signals {
+    if signal_is_active(signal, selected_branch) {
+      match encode_raw_signal(signal, values[input_index], payload) {
+        Ok(encoded) => payload = encoded
+        Err(error) => return Err(error)
+      }
+      input_index += 1
     }
-    i += 1
   }
   Ok(payload)
+}
+
+///|
+fn signal_is_active(signal : SignalDefinition, selected_branch : Int?) -> Bool {
+  match signal.multiplexing {
+    NotMultiplexed | Multiplexor => true
+    Multiplexed(branch) => selected_branch == Some(branch)
+  }
+}
+
+///|
+fn active_signal_count(
+  message : MessageDefinition,
+  selected_branch : Int?,
+) -> Int {
+  let mut count = 0
+  for signal in message.signals {
+    if signal_is_active(signal, selected_branch) {
+      count += 1
+    }
+  }
+  count
 }
 
 ///|
@@ -1670,8 +1887,31 @@ pub fn encode_frame(
       Warning => ()
     }
   }
+  let selector_branch = if message.signals.length() > 0 &&
+    message.signals[0].multiplexing is Multiplexor {
+    let selector_name = message.signals[0].name
+    let mut selector_value : RawSignalValue? = None
+    for (name, value) in signal_values {
+      if name == selector_name {
+        if selector_value is Some(_) {
+          return Err(DuplicateSignalValue(name))
+        }
+        selector_value = Some(value)
+      }
+    }
+    match selector_value {
+      Some(UnsignedValue(raw)) => Some(raw.to_int())
+      Some(_) => return Err(Codec(RawSignednessMismatch))
+      None => return Err(MissingSignalValue(selector_name))
+    }
+  } else {
+    None
+  }
   let ordered_values : Array[RawSignalValue] = []
   for signal in message.signals {
+    if !signal_is_active(signal, selector_branch) {
+      continue
+    }
     let mut found : RawSignalValue? = None
     for (name, value) in signal_values {
       if name == signal.name {
@@ -1689,7 +1929,7 @@ pub fn encode_frame(
   for (name, _) in signal_values {
     let mut known = false
     for signal in message.signals {
-      if signal.name == name {
+      if signal.name == name && signal_is_active(signal, selector_branch) {
         known = true
       }
     }
