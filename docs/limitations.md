@@ -2,8 +2,10 @@
 
 - The parser implements a defined classic CAN DBC subset, not the complete DBC
   grammar. Some metadata is skipped with diagnostics rather than preserved.
-- Extended CAN identifiers, multiplexed signals, floating-point signal types,
-  and potentially layout-changing attributes are rejected.
+- Multiplexed signals, floating-point signal types, and potentially
+  layout-changing attributes are rejected. Standard and extended classic CAN
+  identifiers are supported; extended identifiers use DBC's bit-31 marker in
+  the schema and explicit frame-type selection in the frame-level CLI/API.
 - The codec is signal-level software. It does not open CAN hardware, listen to
   a bus, parse capture formats, or implement transport protocols.
 - Physical conversions use `Double` and are limited by the explicit 2^53 raw

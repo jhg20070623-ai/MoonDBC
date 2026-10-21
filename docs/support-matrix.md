@@ -17,10 +17,12 @@ not imply that MoonDBC preserves it in a round-trip writer.
 | Other `BA_` assignments | Rejected | Attributes can change frame/signal interpretation. |
 | Integer `SIG_VALTYPE_` | Diagnostic and skipped | Explicit integer type leaves the supported integer interpretation unchanged. |
 | Floating `SIG_VALTYPE_` | Rejected | Floating representation is not implemented. |
-| Extended CAN identifier | Rejected | Identifier format is not silently treated as a standard 11-bit ID. |
+| Extended CAN identifier | Supported | DBC bit-31 marker is preserved in the schema; CLI frame matching uses the actual 29-bit ID and explicit standard/extended frame type. |
 | Multiplexing | Rejected | Multiplexor-dependent signal interpretation is unsupported. |
 | CAN FD, ARXML | Not implemented | Outside the current parser and codec. |
 
-The accepted message ID range is 0–2047 and DLC is 0–8. See the parser source
-and tests for precise syntax checks; DBC dialects can vary, and this matrix does
-not claim complete DBC standard compatibility.
+The accepted standard CAN ID range is 0–2047; extended CAN IDs range from 0 to
+0x1FFFFFFF and are represented in DBC message identifiers using the bit-31
+extended-frame marker. DLC is 0–8. See the parser source and tests for precise
+syntax checks; DBC dialects can vary, and this matrix does not claim complete
+DBC standard compatibility.

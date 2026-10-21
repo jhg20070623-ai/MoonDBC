@@ -1,6 +1,6 @@
 ///|
 fn usage() -> String {
-  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc> [--json]\n  moondbc decode <file.dbc> --frame-id <id> --data <hex> [--json]\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. Encode values are raw integers by default; pass --physical to encode physical values. JSON raw values are decimal strings to preserve 64-bit precision."
+  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc> [--json]\n  moondbc decode <file.dbc> --frame-id <id> --data <hex> [--extended] [--json]\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. --frame-id is the on-bus ID; use --extended for 29-bit frames. Encode values are raw integers by default; pass --physical to encode physical values. JSON raw values are decimal strings to preserve 64-bit precision."
 }
 
 ///|
@@ -52,20 +52,31 @@ async fn main {
       inspect_database(database)
     }
   } else if command == "decode" {
-    let json_mode = argv.length() == 8 && argv[7] == "--json"
-    if (argv.length() != 7 && !json_mode) ||
-      argv[3] != "--frame-id" ||
-      argv[5] != "--data" {
+    if argv.length() < 7 || argv[3] != "--frame-id" || argv[5] != "--data" {
       fail(usage())
+    }
+    let mut json_mode = false
+    let mut extended = false
+    let mut option_index = 7
+    while option_index < argv.length() {
+      if argv[option_index] == "--json" && !json_mode {
+        json_mode = true
+      } else if argv[option_index] == "--extended" && !extended {
+        extended = true
+      } else {
+        fail("unknown or repeated decode option: {argv[option_index]}")
+      }
+      option_index += 1
     }
     let database = read_database(argv[2])
     if !json_mode {
       print_diagnostics(database)
     }
     ensure_valid_schema(database)
-    let frame_id = parse_frame_id(argv[4])
+    let can_id = parse_frame_id(argv[4])
     let payload = parse_hex_payload(argv[6])
-    let decoded = match @lib.decode_frame(database, frame_id, payload) {
+    let decoded = match
+      @lib.decode_can_frame(database, can_id, extended, payload) {
       Ok(frame) => frame
       Err(error) => fail(frame_error_text(error))
     }
@@ -73,8 +84,16 @@ async fn main {
       decode_frame_json(database, decoded, payload)
       return
     }
-    println("frame: id=\{decoded.message_id} name=\{decoded.message_name}")
-    let message = match @lib.find_message(database, frame_id) {
+    let (display_id, is_extended) = match
+      @lib.dbc_id_to_can_id(decoded.message_id) {
+      Ok(identity) => identity
+      Err(_) => fail("internal error: invalid DBC frame identifier")
+    }
+    let frame_kind = if is_extended { "extended" } else { "standard" }
+    println(
+      "frame: id=\{display_id} type=\{frame_kind} name=\{decoded.message_name}",
+    )
+    let message = match @lib.find_message(database, decoded.message_id) {
       Some(message) => message
       None => fail("internal error: decoded message disappeared")
     }
@@ -175,14 +194,20 @@ async fn main {
 }
 
 ///|
-fn inspect_database_json(database : @lib.DbcDatabase) -> Unit {
+fn inspect_database_json(database : @lib.DbcDatabase) -> Unit raise {
   let output = StringBuilder()
   output.write_string("{\"messages\":[")
   for message_index, message in database.messages {
     if message_index > 0 {
       output.write_char(',')
     }
-    output.write_string("{\"id\":\{message.id},\"name\":")
+    let (can_id, is_extended) = match @lib.dbc_id_to_can_id(message.id) {
+      Ok(identity) => identity
+      Err(_) => fail("internal error: invalid DBC frame identifier")
+    }
+    output.write_string(
+      "{\"id\":\{can_id},\"extended\":\{is_extended},\"name\":",
+    )
     output.write_string(json_string(message.name))
     output.write_string(",\"dlc\":\{message.dlc},\"signals\":[")
     for signal_index, signal in message.signals {
@@ -252,7 +277,13 @@ fn decode_frame_json(
   payload : Bytes,
 ) -> Unit raise {
   let output = StringBuilder()
-  output.write_string("{\"frame_id\":\{decoded.message_id},\"message\":")
+  let (can_id, is_extended) = match @lib.dbc_id_to_can_id(decoded.message_id) {
+    Ok(identity) => identity
+    Err(_) => fail("internal error: invalid DBC frame identifier")
+  }
+  output.write_string(
+    "{\"frame_id\":\{can_id},\"extended\":\{is_extended},\"message\":",
+  )
   output.write_string(json_string(decoded.message_name))
   output.write_string(",\"data\":")
   output.write_string(json_string(payload_to_hex(payload)))
@@ -376,9 +407,14 @@ fn print_diagnostics(database : @lib.DbcDatabase) -> Unit {
 }
 
 ///|
-fn inspect_database(database : @lib.DbcDatabase) -> Unit {
+fn inspect_database(database : @lib.DbcDatabase) -> Unit raise {
   for message in database.messages {
-    println("BO_ \{message.id} \{message.name}: DLC=\{message.dlc}")
+    let (can_id, is_extended) = match @lib.dbc_id_to_can_id(message.id) {
+      Ok(identity) => identity
+      Err(_) => fail("internal error: invalid DBC frame identifier")
+    }
+    let frame_kind = if is_extended { "extended" } else { "standard" }
+    println("BO_ \{can_id} (\{frame_kind}) \{message.name}: DLC=\{message.dlc}")
     for signal in message.signals {
       let order = match signal.byte_order {
         @lib.Intel => "Intel"
@@ -645,6 +681,10 @@ fn codec_error_text(error : @lib.CodecError) -> String {
 fn frame_error_text(error : @lib.FrameError) -> String {
   match error {
     @lib.UnknownMessageId(id) => "unknown message ID: \{id}"
+    @lib.InvalidCanId(@lib.CanIdOutOfRange) =>
+      "CAN ID exceeds the selected frame type range"
+    @lib.InvalidCanId(@lib.InvalidDbcIdentifier) =>
+      "invalid DBC frame identifier"
     @lib.UnknownMessageName(name) => "unknown message name: \{name}"
     @lib.InvalidSchema(code) => "invalid schema: \{code}"
     @lib.MissingSignalValue(name) => "missing raw value for signal: \{name}"

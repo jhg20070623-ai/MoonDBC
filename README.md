@@ -89,15 +89,17 @@ JSON parser, including signed and unsigned 64-bit boundaries.
 ## Supported subset
 
 The current implementation handles classic CAN frames with DLC 0–8, standard
-message IDs in the range 0–2047, Intel little-endian and Motorola DBC sawtooth
-bit numbering, signed and unsigned integer signals, factor/offset conversion,
-and schema checks for widths, ranges, overlap, and DLC bounds. The current
+and extended 29-bit message identifiers, Intel little-endian and Motorola DBC
+sawtooth bit numbering, signed and unsigned integer signals, factor/offset
+conversion, and schema checks for widths, ranges, overlap, and DLC bounds. DBC
+extended identifiers use the DBC bit-31 marker internally; the frame CLI takes
+the actual on-bus identifier and an explicit `--extended` flag. The current
 parser's exact declaration handling is listed in
 [`docs/support-matrix.md`](docs/support-matrix.md).
 
-Extended identifiers, multiplexing, floating-point signals, and attributes
-that can alter frame or signal interpretation are rejected. CAN FD, ARXML, CAN
-hardware I/O, and complete DBC compatibility are outside this MVP.
+Multiplexing, floating-point signals, and attributes that can alter frame or
+signal interpretation are rejected. CAN FD, ARXML, CAN hardware I/O, and
+complete DBC compatibility are outside this MVP.
 
 ## Tests and independent comparison
 

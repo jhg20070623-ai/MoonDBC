@@ -90,6 +90,33 @@ async fn main {
     false,
   )
   check_cli(
+    "standard 0x123 frame selects standard message",
+    [
+      "run", "cmd/moondbc", "--", "decode", "testdata/extended_can.dbc",
+      "--frame-id", "291", "--data", "11",
+    ],
+    true,
+    expected_output="name=StandardFrame",
+  )
+  check_cli(
+    "extended 0x123 frame selects extended message",
+    [
+      "run", "cmd/moondbc", "--", "decode", "testdata/extended_can.dbc",
+      "--frame-id", "291", "--data", "22", "--extended",
+    ],
+    true,
+    expected_output="name=ExtendedFrame",
+  )
+  check_cli(
+    "extended frame JSON reports on-bus ID and frame type",
+    [
+      "run", "cmd/moondbc", "--", "decode", "testdata/extended_can.dbc",
+      "--frame-id", "291", "--data", "22", "--extended", "--json",
+    ],
+    true,
+    expected_output="\"frame_id\":291,\"extended\":true,\"message\":\"ExtendedFrame\"",
+  )
+  check_cli(
     "invalid CLI arguments fail",
     ["run", "cmd/moondbc", "--", "decode", "testdata/minimal.dbc", "--frame-id", "256"],
     false,
@@ -99,5 +126,5 @@ async fn main {
     ["run", "cmd/moondbc", "--", "validate", "testdata/not-found.dbc"],
     false,
   )
-  println("PASS file-level CLI integration: 11 checks")
+  println("PASS file-level CLI integration: 14 checks")
 }

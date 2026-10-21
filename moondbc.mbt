@@ -160,12 +160,20 @@ pub(all) enum CodecError {
 /// Errors returned by database-level frame operations.
 pub(all) enum FrameError {
   UnknownMessageId(UInt)
+  InvalidCanId(CanIdError)
   UnknownMessageName(String)
   InvalidSchema(String)
   MissingSignalValue(String)
   DuplicateSignalValue(String)
   UnknownSignalValue(String)
   Codec(CodecError)
+}
+
+///|
+/// Invalid identifier when converting between a CAN ID and DBC's encoded ID.
+pub(all) enum CanIdError {
+  CanIdOutOfRange
+  InvalidDbcIdentifier
 }
 
 ///|
@@ -539,6 +547,38 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
 }
 
 ///|
+/// Convert a standard or extended CAN identifier to the integer convention
+/// used by DBC `BO_` declarations. DBC marks extended IDs with bit 31.
+pub fn can_id_to_dbc_id(
+  can_id : UInt,
+  extended : Bool,
+) -> Result[UInt, CanIdError] {
+  if extended {
+    if can_id > 0x1FFFFFFFU {
+      Err(CanIdOutOfRange)
+    } else {
+      Ok(can_id + 0x80000000U)
+    }
+  } else if can_id > 0x7FFU {
+    Err(CanIdOutOfRange)
+  } else {
+    Ok(can_id)
+  }
+}
+
+///|
+/// Decode a DBC `BO_` identifier into its on-bus CAN ID and frame type.
+pub fn dbc_id_to_can_id(dbc_id : UInt) -> Result[(UInt, Bool), CanIdError] {
+  if dbc_id <= 0x7FFU {
+    Ok((dbc_id, false))
+  } else if dbc_id >= 0x80000000U && dbc_id - 0x80000000U <= 0x1FFFFFFFU {
+    Ok((dbc_id - 0x80000000U, true))
+  } else {
+    Err(InvalidDbcIdentifier)
+  }
+}
+
+///|
 fn find_message_by_id(
   messages : Array[MessageDefinition],
   message_id : UInt,
@@ -869,11 +909,11 @@ fn parse_message(
         message: "invalid BO_ message id",
       })
   }
-  if id > 0x7FFU {
+  if id > 0x7FFU && !(id >= 0x80000000U && id - 0x80000000U <= 0x1FFFFFFFU) {
     return Err(ParseError::{
       line,
-      kind: UnsupportedSemantic,
-      message: "POC supports standard 11-bit CAN identifiers only",
+      kind: InvalidField,
+      message: "CAN identifier must be an 11-bit ID or a DBC-marked 29-bit extended ID",
     })
   }
   let name = tokens[2]
@@ -1165,11 +1205,12 @@ pub fn validate_schema(database : DbcDatabase) -> Array[ValidationIssue] {
         line: message.source_line,
       })
     }
-    if message.id > 0x7FFU {
+    if message.id > 0x7FFU &&
+      !(message.id >= 0x80000000U && message.id - 0x80000000U <= 0x1FFFFFFFU) {
       issues.push(ValidationIssue::{
         severity: Error,
         code: "MESSAGE_ID_OUT_OF_RANGE",
-        message: "POC supports standard 11-bit CAN identifiers only",
+        message: "message ID is neither an 11-bit standard nor DBC-marked 29-bit extended identifier",
         line: message.source_line,
       })
     }
@@ -1582,6 +1623,22 @@ pub fn decode_frame(
         values,
       })
     Err(error) => Err(Codec(error))
+  }
+}
+
+///|
+/// Decode using the on-bus CAN ID and explicit frame type. This prevents a
+/// standard frame and an extended frame with the same numeric ID from matching
+/// each other's DBC message.
+pub fn decode_can_frame(
+  database : DbcDatabase,
+  can_id : UInt,
+  extended : Bool,
+  payload : Bytes,
+) -> Result[DecodedFrame, FrameError] {
+  match can_id_to_dbc_id(can_id, extended) {
+    Ok(dbc_id) => decode_frame(database, dbc_id, payload)
+    Err(error) => Err(InvalidCanId(error))
   }
 }
 

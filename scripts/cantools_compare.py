@@ -22,6 +22,10 @@ BO_ 257 MotorolaMsg: 2 ECU
  SG_ MotorolaValue : 7|12@0+ (1,0) [0|4095] "raw" ECU
 BO_ 258 SignedMsg: 2 ECU
  SG_ SignedValue : 0|12@1- (1,0) [-2048|2047] "raw" ECU
+BO_ 291 StandardFrame: 1 ECU
+ SG_ Value : 0|8@1+ (1,0) [0|255] "" ECU
+BO_ 2147483939 ExtendedFrame: 1 ECU
+ SG_ Value : 0|8@1+ (1,0) [0|255] "" ECU
 '''
 
 MOTOROLA_WIDTHS = [1, 7, 8, 9, 12, 16, 32, 63, 64]
@@ -57,6 +61,8 @@ def main() -> None:
     intel = database.get_message_by_frame_id(256)
     motorola = database.get_message_by_frame_id(257)
     signed = database.get_message_by_frame_id(258)
+    standard_frame = database.get_message_by_name("StandardFrame")
+    extended_frame = database.get_message_by_name("ExtendedFrame")
     moonbit_run = subprocess.run(
         ["moon", "run", "cmd/vectors"],
         check=True,
@@ -141,6 +147,25 @@ def main() -> None:
     except Exception:
         malformed_failed = True
     check(malformed_failed, "malformed DBC rejected")
+
+    check(not standard_frame.is_extended_frame, "cantools classifies standard CAN frame")
+    check(extended_frame.is_extended_frame, "cantools classifies DBC-marked extended CAN frame")
+    standard_payload = bytes.fromhex("11")
+    extended_payload = bytes.fromhex("22")
+    standard_cli = subprocess.run(
+        ["moon", "run", "cmd/moondbc", "--", "decode", "testdata/extended_can.dbc",
+         "--frame-id", "291", "--data", standard_payload.hex()],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    extended_cli = subprocess.run(
+        ["moon", "run", "cmd/moondbc", "--", "decode", "testdata/extended_can.dbc",
+         "--frame-id", "291", "--data", extended_payload.hex(), "--extended"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    standard_raw = standard_frame.decode(standard_payload, decode_choices=False, scaling=False)["Value"]
+    extended_raw = extended_frame.decode(extended_payload, decode_choices=False, scaling=False)["Value"]
+    check(f"raw={standard_raw}" in standard_cli, "MoonBit/cantools agree: standard frame ID dispatch")
+    check(f"raw={extended_raw}" in extended_cli, "MoonBit/cantools agree: extended frame ID dispatch")
 
     for index, width in enumerate(MOTOROLA_WIDTHS):
         unsigned_id = 300 + index * 2

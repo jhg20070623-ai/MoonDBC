@@ -288,13 +288,80 @@ test "parser rejects frame-format attributes, multiplexing and float signals" {
       }
     Ok(_) => fail("floating signal type was silently interpreted as integer")
   }
-  match @moondbc.parse_dbc("BO_ 2147483904 Extended: 8 ECU") {
-    Err(error) =>
-      match error.kind {
-        @moondbc.UnsupportedSemantic => ()
-        _ => fail("extended identifier had wrong error classification")
-      }
-    Ok(_) => fail("extended identifier was silently treated as standard CAN")
+}
+
+///|
+test "CAN ID conversion preserves standard and extended boundaries" {
+  match @moondbc.can_id_to_dbc_id(0x7FFU, false) {
+    Ok(id) => assert_eq(id, 0x7FFU)
+    Err(_) => fail("maximum standard ID rejected")
+  }
+  match @moondbc.can_id_to_dbc_id(0x1FFFFFFFU, true) {
+    Ok(id) => assert_eq(id, 0x9FFFFFFFU)
+    Err(_) => fail("maximum extended ID rejected")
+  }
+  match @moondbc.dbc_id_to_can_id(0x7FFU) {
+    Ok(identity) => assert_eq(identity, (0x7FFU, false))
+    Err(_) => fail("standard DBC ID did not round-trip")
+  }
+  match @moondbc.dbc_id_to_can_id(0x9FFFFFFFU) {
+    Ok(identity) => assert_eq(identity, (0x1FFFFFFFU, true))
+    Err(_) => fail("extended DBC ID did not round-trip")
+  }
+  match @moondbc.can_id_to_dbc_id(0x800U, false) {
+    Err(@moondbc.CanIdOutOfRange) => ()
+    _ => fail("out-of-range standard ID was accepted")
+  }
+  match @moondbc.can_id_to_dbc_id(0x20000000U, true) {
+    Err(@moondbc.CanIdOutOfRange) => ()
+    _ => fail("out-of-range extended ID was accepted")
+  }
+  match @moondbc.dbc_id_to_can_id(0x800U) {
+    Err(@moondbc.InvalidDbcIdentifier) => ()
+    _ => fail("unmarked 12-bit DBC identifier was accepted")
+  }
+}
+
+///|
+test "standard and extended messages with the same bus ID remain distinct" {
+  let source = "BO_ 291 StandardFrame: 1 ECU\n SG_ Value : 0|8@1+ (1,0) [0|255] \"\" ECU\nBO_ 2147483939 ExtendedFrame: 1 ECU\n SG_ Value : 0|8@1+ (1,0) [0|255] \"\" ECU"
+  let database = match @moondbc.parse_dbc(source) {
+    Ok(database) => database
+    Err(_) => fail("standard and DBC-marked extended IDs should parse")
+  }
+  assert_eq(@moondbc.validate_schema(database).length(), 0)
+  let standard = match
+    @moondbc.decode_can_frame(
+      database,
+      291U,
+      false,
+      Bytes::from_array([b'\x11']),
+    ) {
+    Ok(frame) => frame
+    Err(_) => fail("standard frame failed to select standard definition")
+  }
+  let extended = match
+    @moondbc.decode_can_frame(
+      database,
+      291U,
+      true,
+      Bytes::from_array([b'\x22']),
+    ) {
+    Ok(frame) => frame
+    Err(_) => fail("extended frame failed to select extended definition")
+  }
+  assert_eq(standard.message_name, "StandardFrame")
+  assert_eq(extended.message_name, "ExtendedFrame")
+  assert_true(standard.message_id != extended.message_id)
+  match
+    @moondbc.decode_can_frame(
+      database,
+      2048U,
+      false,
+      Bytes::from_array([b'\x11']),
+    ) {
+    Err(@moondbc.InvalidCanId(@moondbc.CanIdOutOfRange)) => ()
+    _ => fail("out-of-range standard ID was not rejected")
   }
 }
 
