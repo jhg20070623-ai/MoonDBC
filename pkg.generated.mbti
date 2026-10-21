@@ -20,6 +20,10 @@ pub fn encode_raw_signal(SignalDefinition, RawSignalValue, Bytes) -> Result[Byte
 
 pub fn find_message(DbcDatabase, UInt) -> MessageDefinition?
 
+pub fn lookup_raw_value(DbcDatabase, UInt, String, String) -> Result[RawSignalValue, ValueTableError]
+
+pub fn lookup_value_label(DbcDatabase, UInt, String, RawSignalValue) -> Result[String, ValueTableError]
+
 pub fn parse_dbc(String) -> Result[DbcDatabase, ParseError]
 
 pub fn validate_schema(DbcDatabase) -> Array[ValidationIssue]
@@ -48,6 +52,7 @@ pub(all) enum CodecError {
 
 pub(all) struct DbcDatabase {
   messages : Array[MessageDefinition]
+  value_descriptions : Array[SignalValueDescription]
   diagnostics : Array[ParseDiagnostic]
 }
 
@@ -120,6 +125,14 @@ pub(all) struct SignalDefinition {
   source_line : Int
 }
 
+pub(all) struct SignalValueDescription {
+  message_id : UInt
+  signal_name : String
+  raw_value : RawSignalValue
+  label : String
+  source_line : Int
+}
+
 pub(all) enum Signedness {
   Unsigned
   Signed
@@ -130,6 +143,13 @@ pub(all) struct ValidationIssue {
   code : String
   message : String
   line : Int
+}
+
+pub(all) enum ValueTableError {
+  ValueTableNotFound
+  ValueLabelNotFound(String)
+  AmbiguousValueLabel(String)
+  RawValueNotFound
 }
 
 // Type aliases

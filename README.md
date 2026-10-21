@@ -47,6 +47,13 @@ raw integer cannot be represented exactly by the current `Double` conversion
 policy. Physical encoding rejects out-of-range and non-integral inverse-scale
 values; it does not round or clamp.
 
+DBC `VAL_` integer choice tables are retained in `DbcDatabase.value_descriptions`.
+Use `lookup_value_label(database, message_id, signal_name, raw_value)` to map a
+raw value to its label, or `lookup_raw_value(database, message_id, signal_name,
+label)` for the reverse mapping. These helpers do not change raw/physical codec
+behavior; malformed, duplicate, or out-of-range table entries are rejected or
+reported by parsing and schema validation.
+
 ## CLI
 
 All examples below run from the repository root and use project-authored

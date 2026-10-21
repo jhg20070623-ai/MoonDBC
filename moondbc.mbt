@@ -51,7 +51,35 @@ pub(all) struct MessageDefinition {
 /// Parsed, minimal DBC database.
 pub(all) struct DbcDatabase {
   messages : Array[MessageDefinition]
+  value_descriptions : Array[SignalValueDescription]
   diagnostics : Array[ParseDiagnostic]
+}
+
+///|
+/// A raw-value label declared by a DBC `VAL_` table.
+pub(all) struct SignalValueDescription {
+  message_id : UInt
+  signal_name : String
+  raw_value : RawSignalValue
+  label : String
+  source_line : Int
+}
+
+///|
+/// Errors returned by enum-label lookup and conversion helpers.
+pub(all) enum ValueTableError {
+  ValueTableNotFound
+  ValueLabelNotFound(String)
+  AmbiguousValueLabel(String)
+  RawValueNotFound
+}
+
+///|
+priv struct PendingValueChoice {
+  message_id : UInt
+  signal_name : String
+  choices : Array[(String, String)]
+  source_line : Int
 }
 
 ///|
@@ -135,6 +163,8 @@ pub(all) struct DecodedFrame {
 /// syntax that can change signal interpretation is rejected.
 pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
   let messages : Array[MessageDefinition] = []
+  let value_descriptions : Array[SignalValueDescription] = []
+  let pending_value_tables : Array[PendingValueChoice] = []
   let diagnostics : Array[ParseDiagnostic] = []
   let lines = source.split("\n")
   let mut line_number = 0
@@ -242,7 +272,7 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
           message: "malformed VAL_ choice declaration",
         })
       }
-      let _frame_id = @string.parse_uint(tokens[1].to_string_view()) catch {
+      let frame_id = @string.parse_uint(tokens[1].to_string_view()) catch {
         _ =>
           return Err(ParseError::{
             line: line_number,
@@ -250,18 +280,45 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
             message: "invalid frame id in VAL_ declaration",
           })
       }
-      let _raw_choice = @string.parse_int(tokens[3].to_string_view()) catch {
-        _ =>
+      let final_token = tokens[tokens.length() - 1]
+      if !final_token.has_suffix("\";") {
+        return Err(ParseError::{
+          line: line_number,
+          kind: InvalidField,
+          message: "VAL_ choice labels must be quoted and terminated by ';'",
+        })
+      }
+      if (tokens.length() - 3) % 2 != 0 {
+        return Err(ParseError::{
+          line: line_number,
+          kind: InvalidField,
+          message: "VAL_ entries must contain raw-value and quoted-label pairs",
+        })
+      }
+      let choices : Array[(String, String)] = []
+      let mut choice_index = 3
+      while choice_index < tokens.length() {
+        let raw_label_token = tokens[choice_index + 1]
+        let label_token = if raw_label_token.has_suffix(";") {
+          raw_label_token[0:raw_label_token.length() - 1].to_owned()
+        } else {
+          raw_label_token
+        }
+        if !label_token.has_prefix("\"") || !label_token.has_suffix("\"") {
           return Err(ParseError::{
             line: line_number,
             kind: InvalidField,
-            message: "VAL_ choice list must start with an integer raw value",
+            message: "VAL_ labels must be quoted strings",
           })
+        }
+        choices.push((tokens[choice_index], unquote(label_token)))
+        choice_index += 2
       }
-      diagnostics.push(ParseDiagnostic::{
-        line: line_number,
-        code: "VALUE_TABLE_IGNORED",
-        message: "choice labels do not alter raw or physical numeric codec values",
+      pending_value_tables.push(PendingValueChoice::{
+        message_id: frame_id,
+        signal_name: tokens[2],
+        choices,
+        source_line: line_number,
       })
       continue
     }
@@ -393,7 +450,152 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
       message: "NS_ block is missing its BS_: terminator",
     })
   }
-  Ok(DbcDatabase::{ messages, diagnostics, })
+  for table in pending_value_tables {
+    match find_signal_by_id(messages, table.message_id, table.signal_name) {
+      None =>
+        return Err(ParseError::{
+          line: table.source_line,
+          kind: InvalidField,
+          message: "VAL_ references an unknown message or signal",
+        })
+      Some(signal) =>
+        for (raw_text, label) in table.choices {
+          let raw_value = match signal.signedness {
+            Unsigned => {
+              let raw = @string.parse_uint64(raw_text.to_string_view(), base=10) catch {
+                _ =>
+                  return Err(ParseError::{
+                    line: table.source_line,
+                    kind: InvalidField,
+                    message: "VAL_ raw value is not a valid UInt64",
+                  })
+              }
+              UnsignedValue(raw)
+            }
+            Signed => {
+              let raw = @string.parse_int64(raw_text.to_string_view(), base=10) catch {
+                _ =>
+                  return Err(ParseError::{
+                    line: table.source_line,
+                    kind: InvalidField,
+                    message: "VAL_ raw value is not a valid Int64",
+                  })
+              }
+              SignedValue(raw)
+            }
+          }
+          if !raw_fits_signal(signal, raw_value) {
+            return Err(ParseError::{
+              line: table.source_line,
+              kind: InvalidField,
+              message: "VAL_ raw value is outside the referenced signal's representable range",
+            })
+          }
+          value_descriptions.push(SignalValueDescription::{
+            message_id: table.message_id,
+            signal_name: table.signal_name,
+            raw_value,
+            label,
+            source_line: table.source_line,
+          })
+        }
+    }
+  }
+  Ok(DbcDatabase::{ messages, value_descriptions, diagnostics, })
+}
+
+///|
+fn find_signal_by_id(
+  messages : Array[MessageDefinition],
+  message_id : UInt,
+  signal_name : String,
+) -> SignalDefinition? {
+  for message in messages {
+    if message.id == message_id {
+      for signal in message.signals {
+        if signal.name == signal_name {
+          return Some(signal)
+        }
+      }
+    }
+  }
+  None
+}
+
+///|
+fn raw_fits_signal(signal : SignalDefinition, raw : RawSignalValue) -> Bool {
+  match (signal.signedness, raw) {
+    (Unsigned, UnsignedValue(value)) =>
+      signal.bit_length >= 1 &&
+      signal.bit_length <= 64 &&
+      (signal.bit_length == 64 || value < 1UL << signal.bit_length)
+    (Signed, SignedValue(value)) => signed_value_fits(value, signal.bit_length)
+    _ => false
+  }
+}
+
+///|
+fn raw_values_equal(left : RawSignalValue, right : RawSignalValue) -> Bool {
+  match (left, right) {
+    (UnsignedValue(a), UnsignedValue(b)) => a == b
+    (SignedValue(a), SignedValue(b)) => a == b
+    _ => false
+  }
+}
+
+///|
+/// Look up the DBC choice label associated with a signal's raw value.
+pub fn lookup_value_label(
+  database : DbcDatabase,
+  message_id : UInt,
+  signal_name : String,
+  raw_value : RawSignalValue,
+) -> Result[String, ValueTableError] {
+  let mut has_table = false
+  for description in database.value_descriptions {
+    if description.message_id == message_id &&
+      description.signal_name == signal_name {
+      has_table = true
+      if raw_values_equal(description.raw_value, raw_value) {
+        return Ok(description.label)
+      }
+    }
+  }
+  if has_table {
+    Err(RawValueNotFound)
+  } else {
+    Err(ValueTableNotFound)
+  }
+}
+
+///|
+/// Convert a DBC choice label to a raw value. Duplicate matching labels are
+/// reported as ambiguous rather than selecting one silently.
+pub fn lookup_raw_value(
+  database : DbcDatabase,
+  message_id : UInt,
+  signal_name : String,
+  label : String,
+) -> Result[RawSignalValue, ValueTableError] {
+  let mut has_table = false
+  let mut result : RawSignalValue? = None
+  for description in database.value_descriptions {
+    if description.message_id == message_id &&
+      description.signal_name == signal_name {
+      has_table = true
+      if description.label == label {
+        match result {
+          Some(_) => return Err(AmbiguousValueLabel(label))
+          None => result = Some(description.raw_value)
+        }
+      }
+    }
+  }
+  match result {
+    Some(raw) => Ok(raw)
+    None if has_table => Err(ValueLabelNotFound(label))
+    None => Err(ValueTableNotFound)
+  }
 }
 
 ///|
@@ -707,6 +909,57 @@ fn unquote(token : String) -> String {
 /// and overlapping occupied bits. It does not mutate the parsed database.
 pub fn validate_schema(database : DbcDatabase) -> Array[ValidationIssue] {
   let issues : Array[ValidationIssue] = []
+  let mut choice_index = 0
+  while choice_index < database.value_descriptions.length() {
+    let choice = database.value_descriptions[choice_index]
+    let signal = find_signal_by_id(
+      database.messages,
+      choice.message_id,
+      choice.signal_name,
+    )
+    match signal {
+      None =>
+        issues.push(ValidationIssue::{
+          severity: Error,
+          code: "VALUE_TABLE_UNKNOWN_SIGNAL",
+          message: "value description references an unknown message or signal",
+          line: choice.source_line,
+        })
+      Some(definition) if !raw_fits_signal(definition, choice.raw_value) =>
+        issues.push(ValidationIssue::{
+          severity: Error,
+          code: "VALUE_TABLE_RAW_OUT_OF_RANGE",
+          message: "value description raw value is outside the signal range",
+          line: choice.source_line,
+        })
+      Some(_) => ()
+    }
+    let mut previous_choice = 0
+    while previous_choice < choice_index {
+      let previous = database.value_descriptions[previous_choice]
+      if previous.message_id == choice.message_id &&
+        previous.signal_name == choice.signal_name {
+        if raw_values_equal(previous.raw_value, choice.raw_value) {
+          issues.push(ValidationIssue::{
+            severity: Error,
+            code: "DUPLICATE_VALUE_RAW",
+            message: "a signal value table contains a duplicate raw value",
+            line: choice.source_line,
+          })
+        }
+        if previous.label == choice.label {
+          issues.push(ValidationIssue::{
+            severity: Error,
+            code: "AMBIGUOUS_VALUE_LABEL",
+            message: "a signal value label maps to more than one raw value",
+            line: choice.source_line,
+          })
+        }
+      }
+      previous_choice += 1
+    }
+    choice_index += 1
+  }
   let mut i = 0
   while i < database.messages.length() {
     let message = database.messages[i]

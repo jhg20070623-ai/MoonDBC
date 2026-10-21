@@ -115,10 +115,86 @@ test "parser accepts synthetic common-header fixture metadata" {
     Ok(database) => {
       assert_eq(database.messages.length(), 1)
       assert_eq(database.messages[0].signals.length(), 2)
-      assert_true(database.diagnostics.length() >= 8)
+      assert_true(database.diagnostics.length() >= 7)
+      assert_eq(database.value_descriptions.length(), 4)
+      match
+        @moondbc.lookup_value_label(
+          database,
+          256U,
+          "Mode",
+          @moondbc.UnsignedValue(2UL),
+        ) {
+        Ok(label) => assert_eq(label, "Hold")
+        Err(_) => fail("VAL_ raw value did not resolve to its label")
+      }
+      match @moondbc.lookup_raw_value(database, 256U, "Mode", "Fault") {
+        Ok(@moondbc.UnsignedValue(raw)) => assert_eq(raw, 3UL)
+        _ => fail("VAL_ label did not resolve to its raw value")
+      }
       assert_true(@moondbc.validate_schema(database).length() == 0)
     }
     Err(error) => fail("common-header fixture failed on line \{error.line}")
+  }
+}
+
+///|
+test "VAL_ preserves signed and full-width unsigned raw values" {
+  let source = "BO_ 1 Unsigned: 8 ECU\n SG_ U : 0|64@1+ (1,0) [0|18446744073709551615] \"\" ECU\nBO_ 2 Signed: 1 ECU\n SG_ S : 0|8@1- (1,0) [-128|127] \"\" ECU\nVAL_ 1 U 18446744073709551615 \"Maximum\";\nVAL_ 2 S -128 \"Minimum signed\";"
+  match @moondbc.parse_dbc(source) {
+    Err(error) =>
+      fail("valid integer value tables failed on line \{error.line}")
+    Ok(database) => {
+      assert_eq(database.value_descriptions.length(), 2)
+      match @moondbc.lookup_raw_value(database, 1U, "U", "Maximum") {
+        Ok(@moondbc.UnsignedValue(raw)) => assert_eq(raw, 0xFFFFFFFFFFFFFFFFUL)
+        _ => fail("UInt64 maximum was not preserved in the value table")
+      }
+      match
+        @moondbc.lookup_value_label(
+          database,
+          2U,
+          "S",
+          @moondbc.SignedValue(-128L),
+        ) {
+        Ok(label) => assert_eq(label, "Minimum signed")
+        Err(_) => fail("signed minimum did not resolve to its label")
+      }
+      assert_true(@moondbc.validate_schema(database).length() == 0)
+    }
+  }
+}
+
+///|
+test "VAL_ rejects malformed pairs unknown signals and out-of-range values" {
+  for
+    source in [
+      "BO_ 1 M: 1 ECU\n SG_ X : 0|8@1+ (1,0) [0|255] \"\" ECU\nVAL_ 1 X 0;", "BO_ 1 M: 1 ECU\n SG_ X : 0|8@1+ (1,0) [0|255] \"\" ECU\nVAL_ 1 Missing 0 \"Zero\";",
+      "BO_ 1 M: 1 ECU\n SG_ X : 0|2@1+ (1,0) [0|3] \"\" ECU\nVAL_ 1 X 4 \"Too high\";",
+    ] {
+    match @moondbc.parse_dbc(source) {
+      Err(error) =>
+        match error.kind {
+          @moondbc.InvalidField => ()
+          _ => fail("invalid VAL_ table had the wrong error category")
+        }
+      Ok(_) => fail("invalid VAL_ table was silently accepted")
+    }
+  }
+}
+
+///|
+test "VAL_ duplicate raw values and labels are reported by schema validation" {
+  let source = "BO_ 1 M: 1 ECU\n SG_ X : 0|2@1+ (1,0) [0|3] \"\" ECU\nVAL_ 1 X 1 \"Same\" 1 \"Other\" 2 \"Same\";"
+  match @moondbc.parse_dbc(source) {
+    Err(_) => fail("syntactically valid duplicate choices did not parse")
+    Ok(database) => {
+      assert_true(
+        has_issue(@moondbc.validate_schema(database), "DUPLICATE_VALUE_RAW"),
+      )
+      assert_true(
+        has_issue(@moondbc.validate_schema(database), "AMBIGUOUS_VALUE_LABEL"),
+      )
+    }
   }
 }
 
@@ -524,6 +600,7 @@ test "validator catches duplicate IDs signal names overlap and width" {
   }
   let issues = @moondbc.validate_schema(@moondbc.DbcDatabase::{
     messages: [message1, message2],
+    value_descriptions: [],
     diagnostics: [],
   })
   assert_true(has_issue(issues, "DUPLICATE_MESSAGE_ID"))
@@ -544,6 +621,7 @@ test "validator catches out-of-DLC signal and invalid scale" {
   }
   let issues = @moondbc.validate_schema(@moondbc.DbcDatabase::{
     messages: [message],
+    value_descriptions: [],
     diagnostics: [],
   })
   assert_true(has_issue(issues, "SIGNAL_OUT_OF_DLC"))
@@ -562,6 +640,7 @@ test "validator catches invalid physical range and unsupported identifier" {
   }
   let issues = @moondbc.validate_schema(@moondbc.DbcDatabase::{
     messages: [out_of_range_id],
+    value_descriptions: [],
     diagnostics: [],
   })
   assert_true(has_issue(issues, "INVALID_RANGE"))

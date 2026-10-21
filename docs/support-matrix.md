@@ -11,7 +11,7 @@ not imply that MoonDBC preserves it in a round-trip writer.
 | `BS_:` | Diagnostic and skipped | Bus timing is not part of this signal codec. |
 | `BU_:` | Diagnostic and skipped | Node names are not retained. |
 | `CM_` | Validated superficially, diagnostic and skipped | Comments are not retained in the schema. |
-| `VAL_` | Validated superficially, diagnostic and skipped | Choice labels do not alter raw numeric values; labels are not retained. |
+| `VAL_` | Parsed and retained | Integer raw-value/label pairs are attached to their message and signal. Raw values are range-checked using the signal's signedness and bit width. `lookup_value_label` and `lookup_raw_value` expose the mapping; ambiguous duplicate mappings are reported by `validate_schema`. |
 | `BA_DEF_`, `BA_DEF_DEF_` | Validated superficially, diagnostic and skipped | Definitions/defaults are not applied. |
 | Known non-layout `BA_` assignments | Diagnostic and skipped | Only names explicitly allowlisted by the current parser are skipped. |
 | Other `BA_` assignments | Rejected | Attributes can change frame/signal interpretation. |
