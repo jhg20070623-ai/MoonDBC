@@ -1,6 +1,6 @@
 ///|
 fn usage() -> String {
-  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc>\n  moondbc decode <file.dbc> --frame-id <id> --data <hex>\n  moondbc encode <file.dbc> --message <name> --signal <name=raw> [--signal <name=raw> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. Encode values are raw integers."
+  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc>\n  moondbc decode <file.dbc> --frame-id <id> --data <hex>\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. Encode values are raw integers by default; pass --physical to encode physical values."
 }
 
 ///|
@@ -89,7 +89,8 @@ async fn main {
     print_diagnostics(database)
     ensure_valid_schema(database)
     let mut message_name : String? = None
-    let signal_values : Array[(String, @lib.RawSignalValue)] = []
+    let mut physical_mode = false
+    let signal_assignments : Array[String] = []
     let mut index = 3
     while index < argv.length() {
       if argv[index] == "--message" && index + 1 < argv.length() {
@@ -98,10 +99,14 @@ async fn main {
         }
         message_name = Some(argv[index + 1])
         index += 2
+      } else if argv[index] == "--physical" {
+        if physical_mode {
+          fail("--physical may only be provided once")
+        }
+        physical_mode = true
+        index += 1
       } else if argv[index] == "--signal" && index + 1 < argv.length() {
-        signal_values.push(
-          parse_signal_assignment(database, message_name, argv[index + 1]),
-        )
+        signal_assignments.push(argv[index + 1])
         index += 2
       } else {
         fail("unexpected or incomplete encode argument: \{argv[index]}")
@@ -111,10 +116,41 @@ async fn main {
       Some(name) => name
       None => fail("encode requires --message <name>")
     }
-    let payload = match
-      @lib.encode_frame(database, message_name, signal_values) {
-      Ok(payload) => payload
-      Err(error) => fail(frame_error_text(error))
+    let message = find_message_by_name(database, message_name)
+    let payload = if physical_mode {
+      let mut payload = Bytes::make(message.dlc, 0U.to_byte())
+      let seen : Array[String] = []
+      for assignment in signal_assignments {
+        let (name, physical) = parse_physical_assignment(assignment)
+        if seen.contains(name) {
+          fail("signal assigned more than once: \{name}")
+        }
+        seen.push(name)
+        let signal = find_signal(message, name)
+        payload = match @lib.encode_physical(signal, physical, payload) {
+          Ok(encoded) => encoded
+          Err(error) => fail(codec_error_text(error))
+        }
+      }
+      if seen.length() != message.signals.length() {
+        for signal in message.signals {
+          if !seen.contains(signal.name) {
+            fail("missing physical value for signal: \{signal.name}")
+          }
+        }
+      }
+      payload
+    } else {
+      let signal_values : Array[(String, @lib.RawSignalValue)] = []
+      for assignment in signal_assignments {
+        signal_values.push(
+          parse_signal_assignment(database, Some(message_name), assignment),
+        )
+      }
+      match @lib.encode_frame(database, message_name, signal_values) {
+        Ok(payload) => payload
+        Err(error) => fail(frame_error_text(error))
+      }
     }
     println("payload=\{payload_to_hex(payload)}")
   } else {
@@ -321,6 +357,26 @@ fn parse_signal_assignment(
       }
       @lib.SignedValue(raw)
     }
+  }
+  (name, value)
+}
+
+///|
+fn parse_physical_assignment(assignment : String) -> (String, Double) raise {
+  let pieces = assignment.to_string_view().split("=")
+  let name = match pieces.next() {
+    Some(part) => part.to_owned()
+    None => fail("signal must use NAME=VALUE form: \{assignment}")
+  }
+  let value_text = match pieces.next() {
+    Some(part) => part.to_owned()
+    None => fail("signal must use NAME=VALUE form: \{assignment}")
+  }
+  if pieces.next() is Some(_) {
+    fail("signal must use NAME=VALUE form: \{assignment}")
+  }
+  let value = @string.parse_double(value_text.to_string_view()) catch {
+    _ => fail("invalid physical value: \{value_text}")
   }
   (name, value)
 }

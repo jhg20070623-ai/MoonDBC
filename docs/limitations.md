@@ -9,8 +9,9 @@
 - Physical conversions use `Double` and are limited by the explicit 2^53 raw
   integer precision policy. Raw integer APIs remain exact over their supported
   64-bit types.
-- The CLI encode command accepts raw integer values. Physical encoding is
-  currently available through the library API.
+- CLI encoding accepts raw integer values by default. The `--physical` option
+  applies the library's physical-to-raw conversion rules and rejects values
+  that are out of range or do not map exactly to an integer raw value.
 - No vendor DBC files are included. Tests use hand-written synthetic data.
 - Local tests do not establish acceptance of the project topic by the event
   organizers. Their response to the earlier project inquiry was still pending

@@ -7,13 +7,17 @@ async fn check_cli(
   label : String,
   args : Array[String],
   should_succeed : Bool,
+  expected_output? : String,
 ) -> Unit {
-  let status = @process.run("moon", args, cwd=".")
+  let (status, stdout, stderr) = @process.collect_output("moon", args, cwd=".")
   if should_succeed && status != 0 {
-    fail("CLI integration failed: " + label)
+    fail("CLI integration failed: " + label + "\n" + stderr.text())
   }
   if !should_succeed && status == 0 {
     fail("CLI unexpectedly succeeded: " + label)
+  }
+  if expected_output is Some(expected) && !stdout.text().contains(expected) {
+    fail("CLI output did not contain expected text for " + label + ": " + stdout.text())
   }
   println("PASS " + label)
 }
@@ -49,6 +53,7 @@ async fn main {
       "--frame-id", "256", "--data", "A0BC",
     ],
     true,
+    expected_output="IntelValue: raw=3018, physical=1508",
   )
   check_cli(
     "encode executes against disk schema",
@@ -60,6 +65,25 @@ async fn main {
     true,
   )
   check_cli(
+    "physical encode maps values to A2BC",
+    [
+      "run", "cmd/moondbc", "--", "encode", "testdata/minimal.dbc",
+      "--message", "Minimal", "--physical", "--signal",
+      "IntelValue=1508", "--signal", "Mode=2",
+    ],
+    true,
+    expected_output="payload=A2BC",
+  )
+  check_cli(
+    "physical encode rejects non-representable values",
+    [
+      "run", "cmd/moondbc", "--", "encode", "testdata/minimal.dbc",
+      "--message", "Minimal", "--physical", "--signal",
+      "IntelValue=1508.25", "--signal", "Mode=2",
+    ],
+    false,
+  )
+  check_cli(
     "invalid CLI arguments fail",
     ["run", "cmd/moondbc", "--", "decode", "testdata/minimal.dbc", "--frame-id", "256"],
     false,
@@ -69,5 +93,5 @@ async fn main {
     ["run", "cmd/moondbc", "--", "validate", "testdata/not-found.dbc"],
     false,
   )
-  println("PASS file-level CLI integration: 8 checks")
+  println("PASS file-level CLI integration: 10 checks")
 }

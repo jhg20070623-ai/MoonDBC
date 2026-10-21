@@ -57,11 +57,15 @@ moon run cmd/moondbc -- validate testdata/minimal.dbc
 moon run cmd/moondbc -- inspect testdata/common_header.dbc
 moon run cmd/moondbc -- decode testdata/minimal.dbc --frame-id 256 --data A0BC
 moon run cmd/moondbc -- encode testdata/minimal.dbc --message Minimal --signal IntelValue=3018 --signal Mode=2
+moon run cmd/moondbc -- encode testdata/minimal.dbc --message Minimal --physical --signal IntelValue=1508 --signal Mode=2
 ```
 
 The Intel example decodes raw `3018` and physical `1508` because its fixture
 explicitly defines factor `0.5` and offset `-1`. Encoding that raw value with
-`Mode=2` emits `A2BC`.
+`Mode=2` emits `A2BC`. `--physical` interprets assigned values as physical
+quantities and applies the inverse factor/offset conversion; values that do not
+map exactly to an in-range integer raw value are rejected without rounding or
+clamping.
 
 ## Supported subset
 

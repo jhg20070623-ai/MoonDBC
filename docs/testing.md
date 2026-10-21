@@ -16,8 +16,8 @@ requested path; it is not replaced by embedded fixture text.
 
 The MoonBit suite retains the Stage 2.1 tests and adds database-level named
 frame API coverage. The integration script covers minimal, common-header, and
-unsupported-semantics disk fixtures; inspect; Intel decode/encode; argument
-errors; and missing files.
+unsupported-semantics disk fixtures; inspect; Intel decode/encode; physical
+encode success and rejection; argument errors; and missing files.
 
 For the optional independent oracle:
 
