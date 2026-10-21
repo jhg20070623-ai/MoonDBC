@@ -79,6 +79,13 @@ quantities and applies the inverse factor/offset conversion; values that do not
 map exactly to an in-range integer raw value are rejected without rounding or
 clamping.
 
+`inspect` and `decode` also support `--json`. Raw signal values are decimal
+strings so all supported 64-bit integers remain exact in JSON consumers.
+Physical values are JSON numbers when representable; otherwise they are `null`
+with a `physical_status` explaining the precision or range limitation. Run
+`python scripts/json_cli_test.py` to validate the output with Python's standard
+JSON parser, including signed and unsigned 64-bit boundaries.
+
 ## Supported subset
 
 The current implementation handles classic CAN frames with DLC 0–8, standard

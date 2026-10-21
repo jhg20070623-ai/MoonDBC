@@ -1,0 +1,8 @@
+VERSION "MoonDBC JSON precision fixture"
+NS_ :
+BS_:
+BU_: ECU
+BO_ 512 Unsigned64: 8 ECU
+ SG_ MaxUnsigned : 0|64@1+ (1,0) [0|18446744073709551615] "" ECU
+BO_ 513 Signed64: 8 ECU
+ SG_ MinSigned : 0|64@1- (1,0) [-9223372036854775808|9223372036854775807] "" ECU

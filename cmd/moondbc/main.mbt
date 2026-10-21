@@ -1,6 +1,6 @@
 ///|
 fn usage() -> String {
-  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc>\n  moondbc decode <file.dbc> --frame-id <id> --data <hex>\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. Encode values are raw integers by default; pass --physical to encode physical values."
+  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc> [--json]\n  moondbc decode <file.dbc> --frame-id <id> --data <hex> [--json]\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. Encode values are raw integers by default; pass --physical to encode physical values. JSON raw values are decimal strings to preserve 64-bit precision."
 }
 
 ///|
@@ -37,25 +37,41 @@ async fn main {
       "valid: \{database.messages.length()} message(s), \{signal_count(database)} signal(s)",
     )
   } else if command == "inspect" {
-    if argv.length() != 3 {
+    let json_mode = argv.length() == 4 && argv[3] == "--json"
+    if argv.length() != 3 && !json_mode {
       fail(usage())
     }
     let database = read_database(argv[2])
-    print_diagnostics(database)
+    if !json_mode {
+      print_diagnostics(database)
+    }
     ensure_valid_schema(database)
-    inspect_database(database)
+    if json_mode {
+      inspect_database_json(database)
+    } else {
+      inspect_database(database)
+    }
   } else if command == "decode" {
-    if argv.length() != 7 || argv[3] != "--frame-id" || argv[5] != "--data" {
+    let json_mode = argv.length() == 8 && argv[7] == "--json"
+    if (argv.length() != 7 && !json_mode) ||
+      argv[3] != "--frame-id" ||
+      argv[5] != "--data" {
       fail(usage())
     }
     let database = read_database(argv[2])
-    print_diagnostics(database)
+    if !json_mode {
+      print_diagnostics(database)
+    }
     ensure_valid_schema(database)
     let frame_id = parse_frame_id(argv[4])
     let payload = parse_hex_payload(argv[6])
     let decoded = match @lib.decode_frame(database, frame_id, payload) {
       Ok(frame) => frame
       Err(error) => fail(frame_error_text(error))
+    }
+    if json_mode {
+      decode_frame_json(database, decoded, payload)
+      return
     }
     println("frame: id=\{decoded.message_id} name=\{decoded.message_name}")
     let message = match @lib.find_message(database, frame_id) {
@@ -156,6 +172,173 @@ async fn main {
   } else {
     fail("unknown command: \{command}\n\{usage()}")
   }
+}
+
+///|
+fn inspect_database_json(database : @lib.DbcDatabase) -> Unit {
+  let output = StringBuilder()
+  output.write_string("{\"messages\":[")
+  for message_index, message in database.messages {
+    if message_index > 0 {
+      output.write_char(',')
+    }
+    output.write_string("{\"id\":\{message.id},\"name\":")
+    output.write_string(json_string(message.name))
+    output.write_string(",\"dlc\":\{message.dlc},\"signals\":[")
+    for signal_index, signal in message.signals {
+      if signal_index > 0 {
+        output.write_char(',')
+      }
+      output.write_string("{\"name\":")
+      output.write_string(json_string(signal.name))
+      output.write_string(
+        ",\"start_bit\":\{signal.start_bit},\"bit_length\":\{signal.bit_length},\"byte_order\":",
+      )
+      output.write_string(
+        json_string(
+          match signal.byte_order {
+            @lib.Intel => "intel"
+            @lib.Motorola => "motorola"
+          },
+        ),
+      )
+      output.write_string(",\"signedness\":")
+      output.write_string(
+        json_string(
+          match signal.signedness {
+            @lib.Unsigned => "unsigned"
+            @lib.Signed => "signed"
+          },
+        ),
+      )
+      output.write_string(
+        ",\"factor\":\{signal.factor},\"offset\":\{signal.offset},\"unit\":",
+      )
+      output.write_string(json_string(signal.unit))
+      output.write_string("}")
+    }
+    output.write_string("]}")
+  }
+  output.write_string("],\"comments\":[")
+  for index, comment in database.comments {
+    if index > 0 {
+      output.write_char(',')
+    }
+    output.write_string("{\"target\":")
+    output.write_string(json_string(comment_target_text(comment.target)))
+    output.write_string(",\"text\":")
+    output.write_string(json_string(comment.text))
+    output.write_string(",\"line\":\{comment.source_line}}")
+  }
+  output.write_string("],\"diagnostics\":[")
+  for index, diagnostic in database.diagnostics {
+    if index > 0 {
+      output.write_char(',')
+    }
+    output.write_string("{\"code\":")
+    output.write_string(json_string(diagnostic.code))
+    output.write_string(",\"line\":\{diagnostic.line},\"message\":")
+    output.write_string(json_string(diagnostic.message))
+    output.write_char('}')
+  }
+  output.write_string("]}")
+  println(output.to_string())
+}
+
+///|
+fn decode_frame_json(
+  database : @lib.DbcDatabase,
+  decoded : @lib.DecodedFrame,
+  payload : Bytes,
+) -> Unit raise {
+  let output = StringBuilder()
+  output.write_string("{\"frame_id\":\{decoded.message_id},\"message\":")
+  output.write_string(json_string(decoded.message_name))
+  output.write_string(",\"data\":")
+  output.write_string(json_string(payload_to_hex(payload)))
+  output.write_string(",\"signals\":[")
+  let message = match @lib.find_message(database, decoded.message_id) {
+    Some(found) => found
+    None => fail("internal error: decoded message disappeared")
+  }
+  for index, (name, raw) in decoded.values {
+    if index > 0 {
+      output.write_char(',')
+    }
+    let signal = find_signal(message, name)
+    output.write_string("{\"name\":")
+    output.write_string(json_string(name))
+    // Keep raw integers as decimal strings so UInt64 remains exact in every JSON consumer.
+    output.write_string(",\"raw\":")
+    output.write_string(json_string(raw_value_text(raw)))
+    match @lib.decode_physical(signal, raw) {
+      Ok(physical) =>
+        output.write_string(
+          ",\"physical\":\{physical},\"physical_status\":\"available\"",
+        )
+      Err(@lib.PhysicalPrecisionExceeded) =>
+        output.write_string(
+          ",\"physical\":null,\"physical_status\":\"precision_exceeded\"",
+        )
+      Err(@lib.PhysicalOutOfRange) =>
+        output.write_string(
+          ",\"physical\":null,\"physical_status\":\"outside_declared_range\"",
+        )
+      Err(_) =>
+        output.write_string(
+          ",\"physical\":null,\"physical_status\":\"unavailable\"",
+        )
+    }
+    output.write_string(",\"unit\":")
+    output.write_string(json_string(signal.unit))
+    match @lib.lookup_value_label(database, decoded.message_id, name, raw) {
+      Ok(label) => {
+        output.write_string(",\"label\":")
+        output.write_string(json_string(label))
+      }
+      Err(_) => ()
+    }
+    output.write_char('}')
+  }
+  output.write_string("]}")
+  println(output.to_string())
+}
+
+///|
+fn comment_target_text(target : @lib.CommentTarget) -> String {
+  match target {
+    @lib.NetworkComment => "network"
+    @lib.NodeComment(name) => "node:" + name
+    @lib.MessageComment(id) => "message:" + id.to_string()
+    @lib.SignalComment(id, name) => "signal:" + id.to_string() + ":" + name
+  }
+}
+
+///|
+fn json_string(value : String) -> String {
+  let output = StringBuilder()
+  output.write_char('"')
+  for char in value.to_string_view() {
+    match char {
+      '"' => output.write_string("\\\"")
+      '\\' => output.write_string("\\\\")
+      '\n' => output.write_string("\\n")
+      '\r' => output.write_string("\\r")
+      '\t' => output.write_string("\\t")
+      '\b' => output.write_string("\\b")
+      '\u{000C}' => output.write_string("\\f")
+      c if c.to_int() < 0x20 => {
+        let hex = hex_char(c.to_int() / 16)
+        let low = hex_char(c.to_int() % 16)
+        output.write_string("\\u00")
+        output.write_char(hex)
+        output.write_char(low)
+      }
+      _ => output.write_char(char)
+    }
+  }
+  output.write_char('"')
+  output.to_string()
 }
 
 ///|
