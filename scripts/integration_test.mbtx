@@ -81,6 +81,25 @@ async fn main {
     expected_output="payload=A2BC",
   )
   check_cli(
+    "enum label encode maps Hold to raw 2",
+    [
+      "run", "cmd/moondbc", "--", "encode", "testdata/common_header.dbc",
+      "--message", "CommonHeader", "--signal", "Speed=3018", "--signal",
+      "Mode=Hold",
+    ],
+    true,
+    expected_output="payload=A2BC",
+  )
+  check_cli(
+    "text decode prints known enum label",
+    [
+      "run", "cmd/moondbc", "--", "decode", "testdata/common_header.dbc",
+      "--frame-id", "256", "--data", "A2BC",
+    ],
+    true,
+    expected_output="label=Hold",
+  )
+  check_cli(
     "physical encode rejects non-representable values",
     [
       "run", "cmd/moondbc", "--", "encode", "testdata/minimal.dbc",
@@ -162,5 +181,5 @@ async fn main {
     ["run", "cmd/moondbc", "--", "validate", "testdata/not-found.dbc"],
     false,
   )
-  println("PASS file-level CLI integration: 18 checks")
+  println("PASS file-level CLI integration: 20 checks")
 }

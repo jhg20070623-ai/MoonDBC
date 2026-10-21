@@ -70,6 +70,7 @@ moon run cmd/moondbc -- inspect testdata/common_header.dbc
 moon run cmd/moondbc -- decode testdata/minimal.dbc --frame-id 256 --data A0BC
 moon run cmd/moondbc -- decode-log testdata/candump.dbc testdata/candump.log
 moon run cmd/moondbc -- encode testdata/minimal.dbc --message Minimal --signal IntelValue=3018 --signal Mode=2
+moon run cmd/moondbc -- encode testdata/common_header.dbc --message CommonHeader --signal Speed=3018 --signal Mode=Hold
 moon run cmd/moondbc -- encode testdata/minimal.dbc --message Minimal --physical --signal IntelValue=1508 --signal Mode=2
 ```
 
@@ -80,8 +81,15 @@ quantities and applies the inverse factor/offset conversion; values that do not
 map exactly to an in-range integer raw value are rejected without rounding or
 clamping.
 
+For signals with a DBC value table, raw --signal NAME=VALUE assignments may
+use either the integer raw value or its exact label. Text decode output prints
+the label when the decoded raw value has one; JSON decode already includes
+the same label field.
+
 `inspect` and `decode` also support `--json`. Raw signal values are decimal
 strings so all supported 64-bit integers remain exact in JSON consumers.
+JSON inspection includes each signal's multiplexing role and its DBC value
+labels, allowing tools to consume parsed schema metadata.
 Physical values are JSON numbers when representable; otherwise they are `null`
 with a `physical_status` explaining the precision or range limitation. Run
 `python scripts/json_cli_test.py` to validate the output with Python's standard

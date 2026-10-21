@@ -27,6 +27,26 @@ checks += 1
 network = next(c for c in inspection["comments"] if c["target"] == "network")
 assert 'escaped quote: "ready"' in network["text"]
 checks += 1
+mode = next(s for s in inspection["messages"][0]["signals"] if s["name"] == "Mode")
+assert mode["multiplexing"] == {"role": "none"}
+assert mode["values"] == [
+    {"raw": "0", "label": "Off"},
+    {"raw": "1", "label": "On"},
+    {"raw": "2", "label": "Hold"},
+    {"raw": "3", "label": "Fault"},
+]
+checks += 1
+
+multiplexed = run_cli("inspect", "testdata/multiplexed.dbc", "--json")
+signals = multiplexed["messages"][0]["signals"]
+assert next(s for s in signals if s["name"] == "Mode")["multiplexing"] == {
+    "role": "selector"
+}
+assert next(s for s in signals if s["name"] == "A")["multiplexing"] == {
+    "role": "branch",
+    "value": 1,
+}
+checks += 1
 
 decoded = run_cli("decode", "testdata/minimal.dbc", "--frame-id", "256", "--data", "A0BC", "--json")
 signal = next(s for s in decoded["signals"] if s["name"] == "IntelValue")

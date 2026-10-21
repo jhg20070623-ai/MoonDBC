@@ -115,6 +115,10 @@ async fn main {
           )
         Err(_) => println("  \{name}: raw=\{raw_text}, physical=unavailable")
       }
+      match @lib.lookup_value_label(database, decoded.message_id, name, raw) {
+        Ok(label) => println("    label=\{label}")
+        Err(_) => ()
+      }
     }
   } else if command == "decode-log" {
     if argv.length() != 4 {
@@ -247,6 +251,32 @@ fn inspect_database_json(database : @lib.DbcDatabase) -> Unit raise {
         ",\"factor\":\{signal.factor},\"offset\":\{signal.offset},\"unit\":",
       )
       output.write_string(json_string(signal.unit))
+      output.write_string(",\"multiplexing\":")
+      match signal.multiplexing {
+        @lib.NotMultiplexed => output.write_string("{\"role\":\"none\"}")
+        @lib.Multiplexor => output.write_string("{\"role\":\"selector\"}")
+        @lib.Multiplexed(value) =>
+          output.write_string("{\"role\":\"branch\",\"value\":\{value}}")
+      }
+      output.write_string(",\"values\":[")
+      let mut value_index = 0
+      for description in database.value_descriptions {
+        if description.message_id == message.id &&
+          description.signal_name == signal.name {
+          if value_index > 0 {
+            output.write_char(',')
+          }
+          output.write_string("{\"raw\":")
+          output.write_string(
+            json_string(raw_value_text(description.raw_value)),
+          )
+          output.write_string(",\"label\":")
+          output.write_string(json_string(description.label))
+          output.write_char('}')
+          value_index += 1
+        }
+      }
+      output.write_string("]")
       output.write_string("}")
     }
     output.write_string("]}")
@@ -724,18 +754,45 @@ fn parse_signal_assignment(
   let value = match signal.signedness {
     @lib.Unsigned => {
       let raw = @string.parse_uint64(value_text.to_string_view(), base=0) catch {
-        _ => fail("invalid unsigned raw integer: \{value_text}")
+        _ =>
+          return (
+            name,
+            parse_value_label(database, message.id, name, value_text),
+          )
       }
       @lib.UnsignedValue(raw)
     }
     @lib.Signed => {
       let raw = @string.parse_int64(value_text.to_string_view(), base=0) catch {
-        _ => fail("invalid signed raw integer: \{value_text}")
+        _ =>
+          return (
+            name,
+            parse_value_label(database, message.id, name, value_text),
+          )
       }
       @lib.SignedValue(raw)
     }
   }
   (name, value)
+}
+
+///|
+fn parse_value_label(
+  database : @lib.DbcDatabase,
+  message_id : UInt,
+  signal_name : String,
+  label : String,
+) -> @lib.RawSignalValue raise {
+  match @lib.lookup_raw_value(database, message_id, signal_name, label) {
+    Ok(raw) => raw
+    Err(@lib.ValueTableNotFound) =>
+      fail("invalid raw integer or signal has no value table: \{label}")
+    Err(@lib.ValueLabelNotFound(_)) =>
+      fail("unknown value label for \{signal_name}: \{label}")
+    Err(@lib.AmbiguousValueLabel(_)) =>
+      fail("ambiguous value label for \{signal_name}: \{label}")
+    Err(_) => fail("cannot resolve value label for \{signal_name}: \{label}")
+  }
 }
 
 ///|
