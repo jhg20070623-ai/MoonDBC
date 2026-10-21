@@ -1,6 +1,6 @@
 ///|
 fn usage() -> String {
-  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc> [--json]\n  moondbc decode <file.dbc> --frame-id <id> --data <hex> [--extended] [--json]\n  moondbc decode-log <file.dbc> <candump.log>\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. --frame-id is the on-bus ID; use --extended for 29-bit frames. Encode values are raw integers by default; pass --physical to encode physical values. JSON raw values are decimal strings to preserve 64-bit precision. decode-log reads classic candump -L records with 3-digit standard or 8-digit extended IDs and emits one NDJSON record per frame."
+  "Usage:\n  moondbc validate <file.dbc> [--json]\n  moondbc inspect <file.dbc> [--json]\n  moondbc decode <file.dbc> --frame-id <id> --data <hex> [--extended] [--json]\n  moondbc decode-log <file.dbc> <candump.log>\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. --frame-id is the on-bus ID; use --extended for 29-bit frames. Encode values are raw integers by default; pass --physical to encode physical values. JSON raw values are decimal strings to preserve 64-bit precision. validate --json emits machine-readable parser and schema diagnostics. decode-log reads classic candump -L records with 3-digit standard or 8-digit extended IDs and emits one NDJSON record per frame."
 }
 
 ///|
@@ -15,12 +15,19 @@ async fn main {
   }
   let command = argv[1]
   if command == "validate" {
-    if argv.length() != 3 {
+    let json_mode = argv.length() == 4 && argv[3] == "--json"
+    if argv.length() != 3 && !json_mode {
       fail(usage())
     }
     let database = read_database(argv[2])
-    print_diagnostics(database)
+    if !json_mode {
+      print_diagnostics(database)
+    }
     let issues = @lib.validate_schema(database)
+    if json_mode {
+      validate_database_json(database, issues)
+      return
+    }
     if issues.length() > 0 {
       for issue in issues {
         let severity = match issue.severity {
@@ -202,6 +209,57 @@ async fn main {
   } else {
     fail("unknown command: \{command}\n\{usage()}")
   }
+}
+
+///|
+fn validate_database_json(
+  database : @lib.DbcDatabase,
+  issues : Array[@lib.ValidationIssue],
+) -> Unit {
+  let output = StringBuilder()
+  let valid = if issues.length() == 0 { "true" } else { "false" }
+  output.write_string("{\"valid\":")
+  output.write_string(valid)
+  output.write_string(",\"messages\":")
+  output.write_string(database.messages.length().to_string())
+  output.write_string(",\"signals\":")
+  output.write_string(signal_count(database).to_string())
+  output.write_string(",\"diagnostics\":[")
+  let mut diagnostic_count = 0
+  for diagnostic in database.diagnostics {
+    if diagnostic_count > 0 {
+      output.write_char(',')
+    }
+    output.write_string("{\"severity\":\"warning\",\"code\":")
+    output.write_string(json_string(diagnostic.code))
+    output.write_string(",\"line\":")
+    output.write_string(diagnostic.line.to_string())
+    output.write_string(",\"message\":")
+    output.write_string(json_string(diagnostic.message))
+    output.write_char('}')
+    diagnostic_count += 1
+  }
+  for issue in issues {
+    if diagnostic_count > 0 {
+      output.write_char(',')
+    }
+    let severity = match issue.severity {
+      @lib.Error => "error"
+      @lib.Warning => "warning"
+    }
+    output.write_string("{\"severity\":")
+    output.write_string(json_string(severity))
+    output.write_string(",\"code\":")
+    output.write_string(json_string(issue.code))
+    output.write_string(",\"line\":")
+    output.write_string(issue.line.to_string())
+    output.write_string(",\"message\":")
+    output.write_string(json_string(issue.message))
+    output.write_char('}')
+    diagnostic_count += 1
+  }
+  output.write_string("]}")
+  println(output.to_string())
 }
 
 ///|

@@ -86,8 +86,13 @@ use either the integer raw value or its exact label. Text decode output prints
 the label when the decoded raw value has one; JSON decode already includes
 the same label field.
 
-`inspect` and `decode` also support `--json`. Raw signal values are decimal
-strings so all supported 64-bit integers remain exact in JSON consumers.
+`inspect`, `decode`, and `validate` also support `--json`. Raw signal values
+are decimal strings so all supported 64-bit integers remain exact in JSON
+consumers. `validate --json` returns parser warnings and schema issues with
+severity, stable error code, source line, and a `valid` flag; invalid schemas
+are reported with `valid: false`. The command exits successfully when it has
+produced the JSON report, so consumers should use that field as the validation
+result.
 JSON inspection includes each signal's multiplexing role and its DBC value
 labels, allowing tools to consume parsed schema metadata.
 Physical values are JSON numbers when representable; otherwise they are `null`

@@ -1,0 +1,8 @@
+VERSION "MoonDBC synthetic invalid schema fixture"
+
+BO_ 1024 RepeatedId: 1 ECU
+ SG_ Reused : 0|4@1+ (1,0) [0|15] "" ECU
+ SG_ Reused : 2|4@1+ (1,0) [0|15] "" ECU
+
+BO_ 1024 DuplicateFrame: 1 ECU
+ SG_ Other : 0|8@1+ (1,0) [0|255] "" ECU

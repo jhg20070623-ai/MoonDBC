@@ -7,6 +7,8 @@ def run_cli(*args, expect_success=True):
     result = subprocess.run(
         ["moon", "run", "cmd/moondbc", "--", *args],
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )
@@ -66,6 +68,34 @@ checks += 1
 
 invalid = run_cli("decode", "testdata/minimal.dbc", "--frame-id", "256", "--data", "A0", "--json", expect_success=False)
 assert invalid.returncode != 0
+checks += 1
+
+valid_schema = run_cli("validate", "testdata/common_header.dbc", "--json")
+assert valid_schema["valid"] is True
+assert valid_schema["messages"] == 1 and valid_schema["signals"] == 2
+assert isinstance(valid_schema["diagnostics"], list)
+checks += 1
+
+invalid_schema = run_cli(
+    "validate", "testdata/invalid_schema.dbc", "--json"
+)
+schema_result = invalid_schema
+assert schema_result["valid"] is False
+diagnostics = schema_result["diagnostics"]
+assert {diagnostic["code"] for diagnostic in diagnostics} >= {
+    "DUPLICATE_MESSAGE_ID",
+    "DUPLICATE_SIGNAL_NAME",
+    "SIGNAL_OVERLAP",
+}
+assert all(
+    diagnostic["severity"] in {"error", "warning"} for diagnostic in diagnostics
+)
+assert any(diagnostic["severity"] == "error" for diagnostic in diagnostics)
+assert any(diagnostic["severity"] == "warning" for diagnostic in diagnostics)
+lines_by_code = {diagnostic["code"]: diagnostic["line"] for diagnostic in diagnostics}
+assert lines_by_code["DUPLICATE_SIGNAL_NAME"] == 5
+assert lines_by_code["SIGNAL_OVERLAP"] == 5
+assert lines_by_code["DUPLICATE_MESSAGE_ID"] == 7
 checks += 1
 
 print(f"PASS: {checks} JSON CLI checks; output parsed with Python json")
