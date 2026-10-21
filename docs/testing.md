@@ -19,6 +19,11 @@ frame API coverage. The integration script covers minimal, common-header, and
 unsupported-semantics disk fixtures; inspect; Intel decode/encode; physical
 encode success and rejection; argument errors; and missing files.
 
+`scripts/candump_cli_test.py` runs the CLI against authored candump fixtures,
+parses each emitted record with Python's standard JSON parser, and checks
+record order, decoded raw/physical values, extended-frame selection, and
+line-numbered rejection of an unsupported CAN FD record.
+
 For the optional independent oracle:
 
 ```sh

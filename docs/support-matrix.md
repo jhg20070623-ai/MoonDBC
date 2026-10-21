@@ -18,6 +18,7 @@ not imply that MoonDBC preserves it in a round-trip writer.
 | Integer `SIG_VALTYPE_` | Diagnostic and skipped | Explicit integer type leaves the supported integer interpretation unchanged. |
 | Floating `SIG_VALTYPE_` | Rejected | Floating representation is not implemented. |
 | Extended CAN identifier | Supported | DBC bit-31 marker is preserved in the schema; CLI frame matching uses the actual 29-bit ID and explicit standard/extended frame type. |
+| Offline `candump -L` batch decode | Supported subset | CLI accepts `(timestamp) interface ID#DATA` classic CAN records with 3-digit standard or 8-digit extended IDs; emits ordered NDJSON and rejects CAN FD/other spellings with line-numbered errors. |
 | Multiplexing | Rejected | Multiplexor-dependent signal interpretation is unsupported. |
 | CAN FD, ARXML | Not implemented | Outside the current parser and codec. |
 

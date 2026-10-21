@@ -1,0 +1,11 @@
+VERSION "MoonDBC synthetic offline log fixture"
+
+BO_ 256 Minimal: 2 ECU
+ SG_ IntelValue : 4|12@1+ (0.5,-1) [-1|2047] "km/h" ECU
+ SG_ Mode : 0|2@1+ (1,0) [0|3] "" ECU
+
+BO_ 291 StandardFrame: 1 ECU
+ SG_ Value : 0|8@1+ (1,0) [0|255] "" ECU
+
+BO_ 2147483939 ExtendedFrame: 1 ECU
+ SG_ Value : 0|8@1+ (1,0) [0|255] "" ECU

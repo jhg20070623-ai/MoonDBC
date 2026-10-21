@@ -1,6 +1,6 @@
 ///|
 fn usage() -> String {
-  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc> [--json]\n  moondbc decode <file.dbc> --frame-id <id> --data <hex> [--extended] [--json]\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. --frame-id is the on-bus ID; use --extended for 29-bit frames. Encode values are raw integers by default; pass --physical to encode physical values. JSON raw values are decimal strings to preserve 64-bit precision."
+  "Usage:\n  moondbc validate <file.dbc>\n  moondbc inspect <file.dbc> [--json]\n  moondbc decode <file.dbc> --frame-id <id> --data <hex> [--extended] [--json]\n  moondbc decode-log <file.dbc> <candump.log>\n  moondbc encode <file.dbc> --message <name> [--physical] --signal <name=value> [--signal <name=value> ...]\n  moondbc --help\n\nHex data accepts A0BC or A0 BC. --frame-id is the on-bus ID; use --extended for 29-bit frames. Encode values are raw integers by default; pass --physical to encode physical values. JSON raw values are decimal strings to preserve 64-bit precision. decode-log reads classic candump -L records with 3-digit standard or 8-digit extended IDs and emits one NDJSON record per frame."
 }
 
 ///|
@@ -116,6 +116,13 @@ async fn main {
         Err(_) => println("  \{name}: raw=\{raw_text}, physical=unavailable")
       }
     }
+  } else if command == "decode-log" {
+    if argv.length() != 4 {
+      fail("Usage: moondbc decode-log <file.dbc> <candump.log>")
+    }
+    let database = read_database(argv[2])
+    ensure_valid_schema(database)
+    decode_candump_log(database, argv[3])
   } else if command == "encode" {
     if argv.length() < 6 {
       fail(usage())
@@ -276,6 +283,15 @@ fn decode_frame_json(
   decoded : @lib.DecodedFrame,
   payload : Bytes,
 ) -> Unit raise {
+  println(decode_frame_json_text(database, decoded, payload))
+}
+
+///|
+fn decode_frame_json_text(
+  database : @lib.DbcDatabase,
+  decoded : @lib.DecodedFrame,
+  payload : Bytes,
+) -> String raise {
   let output = StringBuilder()
   let (can_id, is_extended) = match @lib.dbc_id_to_can_id(decoded.message_id) {
     Ok(identity) => identity
@@ -332,7 +348,124 @@ fn decode_frame_json(
     output.write_char('}')
   }
   output.write_string("]}")
-  println(output.to_string())
+  output.to_string()
+}
+
+///|
+async fn decode_candump_log(database : @lib.DbcDatabase, path : String) -> Unit {
+  let source = @fs.read_file(path).text() catch {
+    _ => fail("cannot read candump log: \{path}")
+  }
+  let mut record_count = 0
+  for line_index, raw_line in source.split("\n") {
+    let line_number = line_index + 1
+    let line = raw_line.to_owned().trim()
+    if line.is_empty() {
+      continue
+    }
+    let fields = split_whitespace(line.to_string_view())
+    if fields.length() != 3 {
+      fail(
+        "candump line \{line_number}: expected '(timestamp) interface ID#DATA'",
+      )
+    }
+    let timestamp_token = fields[0]
+    if !timestamp_token.has_prefix("(") ||
+      !timestamp_token.has_suffix(")") ||
+      timestamp_token.length() < 3 {
+      fail("candump line \{line_number}: invalid timestamp token")
+    }
+    let timestamp = timestamp_token[1:timestamp_token.length() - 1].to_owned()
+    let interface = fields[1]
+    let frame = fields[2]
+    let separator = find_char_index(frame, '#')
+    if separator < 0 ||
+      separator == 0 ||
+      frame[separator + 1:].to_owned().contains("#") {
+      fail(
+        "candump line \{line_number}: expected one ID#DATA separator; CAN FD is unsupported",
+      )
+    }
+    let id_text = frame[0:separator]
+    let extended = if id_text.length() == 3 {
+      false
+    } else if id_text.length() == 8 {
+      true
+    } else {
+      fail(
+        "candump line \{line_number}: ID must use 3 hex digits (standard) or 8 (extended)",
+      )
+    }
+    let can_id = @string.parse_uint(id_text.to_string_view(), base=16) catch {
+      _ => fail("candump line \{line_number}: invalid hexadecimal CAN ID")
+    }
+    let payload = parse_hex_payload(frame[separator + 1:].to_owned()) catch {
+      _ => fail("candump line \{line_number}: malformed hexadecimal payload")
+    }
+    if payload.length() > 8 {
+      fail("candump line \{line_number}: classic CAN payload exceeds 8 bytes")
+    }
+    let decoded = match
+      @lib.decode_can_frame(database, can_id, extended, payload) {
+      Ok(value) => value
+      Err(error) =>
+        fail("candump line \{line_number}: \{frame_error_text(error)}")
+    }
+    let output = StringBuilder()
+    output.write_string("{\"line\":\{line_number},\"timestamp\":")
+    output.write_string(json_string(timestamp))
+    output.write_string(",\"interface\":")
+    output.write_string(json_string(interface))
+    output.write_string(",\"decoded\":")
+    output.write_string(decode_frame_json_text(database, decoded, payload))
+    output.write_char('}')
+    println(output.to_string())
+    record_count += 1
+  }
+  if record_count == 0 {
+    fail("candump log contains no CAN records")
+  }
+}
+
+///|
+fn split_whitespace(text : StringView) -> Array[String] {
+  let fields : Array[String] = []
+  let mut start = -1
+  let mut index = 0
+  while index < text.length() {
+    let char = match text.get_char(index) {
+      Some(value) => value
+      None => ' '
+    }
+    let whitespace = char == ' ' || char == '\t' || char == '\r'
+    if whitespace {
+      if start >= 0 {
+        fields.push(text.view(start_offset=start, end_offset=index).to_owned())
+        start = -1
+      }
+    } else if start < 0 {
+      start = index
+    }
+    index += 1
+  }
+  if start >= 0 {
+    fields.push(
+      text.view(start_offset=start, end_offset=text.length()).to_owned(),
+    )
+  }
+  fields
+}
+
+///|
+fn find_char_index(text : String, needle : Char) -> Int {
+  let mut index = 0
+  for char in text.to_string_view() {
+    if char == needle {
+      return index
+    }
+    index += 1
+  }
+  -1
 }
 
 ///|

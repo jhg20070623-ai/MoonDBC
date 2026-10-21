@@ -68,6 +68,7 @@ synthetic fixtures:
 moon run cmd/moondbc -- validate testdata/minimal.dbc
 moon run cmd/moondbc -- inspect testdata/common_header.dbc
 moon run cmd/moondbc -- decode testdata/minimal.dbc --frame-id 256 --data A0BC
+moon run cmd/moondbc -- decode-log testdata/candump.dbc testdata/candump.log
 moon run cmd/moondbc -- encode testdata/minimal.dbc --message Minimal --signal IntelValue=3018 --signal Mode=2
 moon run cmd/moondbc -- encode testdata/minimal.dbc --message Minimal --physical --signal IntelValue=1508 --signal Mode=2
 ```
@@ -85,6 +86,13 @@ Physical values are JSON numbers when representable; otherwise they are `null`
 with a `physical_status` explaining the precision or range limitation. Run
 `python scripts/json_cli_test.py` to validate the output with Python's standard
 JSON parser, including signed and unsigned 64-bit boundaries.
+
+`decode-log` reads the documented `candump -L` classic CAN subset: each
+non-empty line contains `(timestamp) interface ID#DATA`, with standard IDs
+written as 3 hexadecimal digits and extended IDs as 8. It emits one NDJSON
+record per frame, preserves source order, and reports malformed or unmatched
+frames with their input line number. CAN FD and other candump spellings are
+rejected. Raw values in each embedded decode record remain decimal strings.
 
 ## Supported subset
 
@@ -113,6 +121,9 @@ moon run scripts/integration_test.mbtx
 ```
 
 The MoonBit integration script launches the CLI on the DBC files under `testdata/`.
+Run `python scripts/candump_cli_test.py` with the development virtual
+environment to independently parse batch output as JSON and verify ordering,
+signal values, extended-frame selection, and line-numbered failure behavior.
 For the optional development-only comparison, install `requirements-dev.txt`
 into a Python virtual environment and run the comparison with that environment's
 interpreter. On Windows:
