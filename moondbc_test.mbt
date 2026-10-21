@@ -115,7 +115,10 @@ test "parser accepts synthetic common-header fixture metadata" {
     Ok(database) => {
       assert_eq(database.messages.length(), 1)
       assert_eq(database.messages[0].signals.length(), 2)
-      assert_true(database.diagnostics.length() >= 7)
+      assert_true(database.diagnostics.length() >= 6)
+      assert_eq(database.comments.length(), 2)
+      assert_eq(database.comments[0].text, "Synthetic common-header fixture")
+      assert_eq(database.comments[1].text, "Synthetic speed signal")
       assert_eq(database.value_descriptions.length(), 4)
       match
         @moondbc.lookup_value_label(
@@ -134,6 +137,53 @@ test "parser accepts synthetic common-header fixture metadata" {
       assert_true(@moondbc.validate_schema(database).length() == 0)
     }
     Err(error) => fail("common-header fixture failed on line \{error.line}")
+  }
+}
+
+///|
+test "parser retains scoped comments and unescapes DBC text" {
+  let source = "BU_: ECU\nBO_ 256 Example: 1 ECU\n SG_ Value : 0|8@1+ (1,0) [0|255] \"\" ECU\nCM_ \"network says \\\"ready\\\"\\nnext\\\\path\";\nCM_ BU_ ECU \"node note\";\nCM_ BO_ 256 \"message note\";\nCM_ SG_ 256 Value \"signal note\";"
+  match @moondbc.parse_dbc(source) {
+    Err(error) => fail("scoped comment fixture failed at line \{error.line}")
+    Ok(database) => {
+      assert_eq(database.comments.length(), 4)
+      assert_eq(database.comments[0].text, "network says \"ready\"\nnext\\path")
+      match database.comments[0].target {
+        @moondbc.NetworkComment => ()
+        _ => fail("network comment target was not retained")
+      }
+      match database.comments[1].target {
+        @moondbc.NodeComment(name) => assert_eq(name, "ECU")
+        _ => fail("node comment target was not retained")
+      }
+      match database.comments[2].target {
+        @moondbc.MessageComment(id) => assert_eq(id, 256U)
+        _ => fail("message comment target was not retained")
+      }
+      match database.comments[3].target {
+        @moondbc.SignalComment(id, name) => {
+          assert_eq(id, 256U)
+          assert_eq(name, "Value")
+        }
+        _ => fail("signal comment target was not retained")
+      }
+    }
+  }
+}
+
+///|
+test "parser rejects comments with missing references and malformed escapes" {
+  match
+    @moondbc.parse_dbc("BO_ 1 Example: 1 ECU\nCM_ SG_ 1 Missing \"orphan\";") {
+    Err(error) => {
+      assert_eq(error.line, 2)
+      assert_true(error.message.contains("unknown"))
+    }
+    Ok(_) => fail("comment referencing an unknown signal was accepted")
+  }
+  match @moondbc.parse_dbc("CM_ \"unterminated;") {
+    Err(error) => assert_eq(error.line, 1)
+    Ok(_) => fail("unterminated comment was accepted")
   }
 }
 
@@ -601,6 +651,7 @@ test "validator catches duplicate IDs signal names overlap and width" {
   let issues = @moondbc.validate_schema(@moondbc.DbcDatabase::{
     messages: [message1, message2],
     value_descriptions: [],
+    comments: [],
     diagnostics: [],
   })
   assert_true(has_issue(issues, "DUPLICATE_MESSAGE_ID"))
@@ -622,6 +673,7 @@ test "validator catches out-of-DLC signal and invalid scale" {
   let issues = @moondbc.validate_schema(@moondbc.DbcDatabase::{
     messages: [message],
     value_descriptions: [],
+    comments: [],
     diagnostics: [],
   })
   assert_true(has_issue(issues, "SIGNAL_OUT_OF_DLC"))
@@ -641,6 +693,7 @@ test "validator catches invalid physical range and unsupported identifier" {
   let issues = @moondbc.validate_schema(@moondbc.DbcDatabase::{
     messages: [out_of_range_id],
     value_descriptions: [],
+    comments: [],
     diagnostics: [],
   })
   assert_true(has_issue(issues, "INVALID_RANGE"))

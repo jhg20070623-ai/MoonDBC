@@ -210,6 +210,31 @@ fn inspect_database(database : @lib.DbcDatabase) -> Unit {
       )
     }
   }
+  for comment in database.comments {
+    let target = match comment.target {
+      @lib.NetworkComment => "CM_"
+      @lib.NodeComment(name) => "CM_ BU_ " + name
+      @lib.MessageComment(id) => "CM_ BO_ " + id.to_string()
+      @lib.SignalComment(id, name) => "CM_ SG_ " + id.to_string() + " " + name
+    }
+    println(target + " \"" + escape_comment(comment.text) + "\";")
+  }
+}
+
+///|
+fn escape_comment(text : String) -> String {
+  let result = StringBuilder()
+  for char in text.to_string_view() {
+    match char {
+      '\\' => result.write_string("\\\\")
+      '"' => result.write_string("\\\"")
+      '\n' => result.write_string("\\n")
+      '\r' => result.write_string("\\r")
+      '\t' => result.write_string("\\t")
+      _ => result.write_char(char)
+    }
+  }
+  result.to_string()
 }
 
 ///|

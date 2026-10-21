@@ -52,7 +52,25 @@ pub(all) struct MessageDefinition {
 pub(all) struct DbcDatabase {
   messages : Array[MessageDefinition]
   value_descriptions : Array[SignalValueDescription]
+  comments : Array[DbcComment]
   diagnostics : Array[ParseDiagnostic]
+}
+
+///|
+/// The DBC object to which a comment applies.
+pub(all) enum CommentTarget {
+  NetworkComment
+  NodeComment(String)
+  MessageComment(UInt)
+  SignalComment(UInt, String)
+}
+
+///|
+/// A comment retained from a DBC `CM_` declaration.
+pub(all) struct DbcComment {
+  target : CommentTarget
+  text : String
+  source_line : Int
 }
 
 ///|
@@ -165,6 +183,9 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
   let messages : Array[MessageDefinition] = []
   let value_descriptions : Array[SignalValueDescription] = []
   let pending_value_tables : Array[PendingValueChoice] = []
+  let comments : Array[DbcComment] = []
+  let pending_comments : Array[DbcComment] = []
+  let node_names : Array[String] = []
   let diagnostics : Array[ParseDiagnostic] = []
   let lines = source.split("\n")
   let mut line_number = 0
@@ -241,6 +262,11 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
       continue
     }
     if tokens[0] == "BU_:" {
+      for node in tokens[1:] {
+        if !node_names.contains(node) {
+          node_names.push(node)
+        }
+      }
       diagnostics.push(ParseDiagnostic::{
         line: line_number,
         code: "NODES_IGNORED",
@@ -249,19 +275,10 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
       continue
     }
     if tokens[0] == "CM_" {
-      if (!line.has_suffix("\"") && !line.has_suffix("\";")) ||
-        !line.contains("\"") {
-        return Err(ParseError::{
-          line: line_number,
-          kind: InvalidField,
-          message: "malformed CM_ comment declaration",
-        })
+      match parse_comment(line, line_number) {
+        Ok(comment) => pending_comments.push(comment)
+        Err(error) => return Err(error)
       }
-      diagnostics.push(ParseDiagnostic::{
-        line: line_number,
-        code: "COMMENT_IGNORED",
-        message: "comments are retained as parser diagnostics only, not in the codec model",
-      })
       continue
     }
     if tokens[0] == "VAL_" {
@@ -501,7 +518,172 @@ pub fn parse_dbc(source : String) -> Result[DbcDatabase, ParseError] {
         }
     }
   }
-  Ok(DbcDatabase::{ messages, value_descriptions, diagnostics, })
+  for comment in pending_comments {
+    let target_exists = match comment.target {
+      NetworkComment => true
+      NodeComment(name) => node_names.contains(name)
+      MessageComment(id) => find_message_by_id(messages, id) is Some(_)
+      SignalComment(id, name) =>
+        find_signal_by_id(messages, id, name) is Some(_)
+    }
+    if !target_exists {
+      return Err(ParseError::{
+        line: comment.source_line,
+        kind: InvalidField,
+        message: "CM_ comment references an unknown node, message, or signal",
+      })
+    }
+    comments.push(comment)
+  }
+  Ok(DbcDatabase::{ messages, value_descriptions, comments, diagnostics, })
+}
+
+///|
+fn find_message_by_id(
+  messages : Array[MessageDefinition],
+  message_id : UInt,
+) -> MessageDefinition? {
+  for message in messages {
+    if message.id == message_id {
+      return Some(message)
+    }
+  }
+  None
+}
+
+///|
+fn parse_comment(
+  line : StringView,
+  source_line : Int,
+) -> Result[DbcComment, ParseError] {
+  let view = line
+  let mut quote_start = -1
+  let mut escaped = false
+  let mut index = 3
+  while index < view.length() {
+    let char = view.get_char(index)
+    if char == Some('"') && !escaped {
+      quote_start = index
+      break
+    }
+    if char == Some('\\') && !escaped {
+      escaped = true
+    } else {
+      escaped = false
+    }
+    index += 1
+  }
+  if quote_start < 0 {
+    return Err(ParseError::{
+      line: source_line,
+      kind: InvalidField,
+      message: "malformed CM_ comment declaration: missing quoted text",
+    })
+  }
+  let prefix = view
+    .view(start_offset=3, end_offset=quote_start)
+    .to_owned()
+    .trim()
+  let prefix_tokens = split_words(prefix.to_string_view())
+  let mut quote_end = quote_start + 1
+  escaped = false
+  while quote_end < view.length() {
+    let char = view.get_char(quote_end)
+    if char == Some('"') && !escaped {
+      break
+    }
+    if char == Some('\\') && !escaped {
+      escaped = true
+    } else {
+      escaped = false
+    }
+    quote_end += 1
+  }
+  if quote_end >= view.length() {
+    return Err(ParseError::{
+      line: source_line,
+      kind: InvalidField,
+      message: "malformed CM_ comment declaration: unterminated quoted text",
+    })
+  }
+  let suffix = view
+    .view(start_offset=quote_end + 1, end_offset=view.length())
+    .to_owned()
+    .trim()
+  if suffix != "" && suffix != ";" {
+    return Err(ParseError::{
+      line: source_line,
+      kind: InvalidField,
+      message: "unexpected text after CM_ comment",
+    })
+  }
+  let target = match prefix_tokens {
+    [] => NetworkComment
+    ["BU_", node] => NodeComment(node)
+    ["BO_", id_text] => {
+      let id = @string.parse_uint(id_text.to_string_view()) catch {
+        _ =>
+          return Err(ParseError::{
+            line: source_line,
+            kind: InvalidField,
+            message: "invalid message ID in CM_ declaration",
+          })
+      }
+      MessageComment(id)
+    }
+    ["SG_", id_text, signal_name] => {
+      let id = @string.parse_uint(id_text.to_string_view()) catch {
+        _ =>
+          return Err(ParseError::{
+            line: source_line,
+            kind: InvalidField,
+            message: "invalid message ID in CM_ signal declaration",
+          })
+      }
+      SignalComment(id, signal_name)
+    }
+    _ =>
+      return Err(ParseError::{
+        line: source_line,
+        kind: InvalidField,
+        message: "unsupported or malformed CM_ target",
+      })
+  }
+  let text = unescape_dbc_text(
+    view.view(start_offset=quote_start + 1, end_offset=quote_end).to_owned(),
+  )
+  Ok(DbcComment::{ target, text, source_line, })
+}
+
+///|
+fn unescape_dbc_text(text : String) -> String {
+  let result = StringBuilder()
+  let view = text.to_string_view()
+  let mut index = 0
+  while index < view.length() {
+    if view.get_char(index) == Some('\\') && index + 1 < view.length() {
+      match view.get_char(index + 1) {
+        Some('"') => result.write_char('"')
+        Some('\\') => result.write_char('\\')
+        Some('n') => result.write_char('\n')
+        Some('r') => result.write_char('\r')
+        Some('t') => result.write_char('\t')
+        Some(other) => {
+          result.write_char('\\')
+          result.write_char(other)
+        }
+        None => ()
+      }
+      index += 2
+    } else {
+      match view.get_char(index) {
+        Some(char) => result.write_char(char)
+        None => ()
+      }
+      index += 1
+    }
+  }
+  result.to_string()
 }
 
 ///|

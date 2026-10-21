@@ -47,6 +47,12 @@ async fn main {
     true,
   )
   check_cli(
+    "inspect preserves scoped comments and escapes quotes",
+    ["run", "cmd/moondbc", "--", "inspect", "testdata/common_header.dbc"],
+    true,
+    expected_output="CM_ \"Synthetic network comment with an escaped quote: \\\"ready\\\"\";",
+  )
+  check_cli(
     "decode executes against disk schema",
     [
       "run", "cmd/moondbc", "--", "decode", "testdata/minimal.dbc",
@@ -93,5 +99,5 @@ async fn main {
     ["run", "cmd/moondbc", "--", "validate", "testdata/not-found.dbc"],
     false,
   )
-  println("PASS file-level CLI integration: 10 checks")
+  println("PASS file-level CLI integration: 11 checks")
 }

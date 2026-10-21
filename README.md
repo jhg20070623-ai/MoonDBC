@@ -54,6 +54,11 @@ label)` for the reverse mapping. These helpers do not change raw/physical codec
 behavior; malformed, duplicate, or out-of-range table entries are rejected or
 reported by parsing and schema validation.
 
+DBC `CM_` network, node, message, and signal comments are retained in
+`DbcDatabase.comments`. Comment references are checked against parsed messages,
+signals, and node declarations. `inspect` prints comments with quotes,
+backslashes, and control characters escaped.
+
 ## CLI
 
 All examples below run from the repository root and use project-authored

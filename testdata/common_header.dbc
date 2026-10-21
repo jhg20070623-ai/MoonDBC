@@ -13,6 +13,8 @@ BO_ 256 CommonHeader: 2 ECU
  SG_ Mode : 0|2@1+ (1,0) [0|3] "" SENSOR
 CM_ BO_ 256 "Synthetic common-header fixture";
 CM_ SG_ 256 Speed "Synthetic speed signal";
+CM_ BU_ ECU "Synthetic ECU node comment";
+CM_ "Synthetic network comment with an escaped quote: \"ready\"";
 VAL_ 256 Mode 0 "Off" 1 "On" 2 "Hold" 3 "Fault";
 BA_DEF_ "BusType" STRING ;
 BA_DEF_DEF_ "BusType" "CAN";
